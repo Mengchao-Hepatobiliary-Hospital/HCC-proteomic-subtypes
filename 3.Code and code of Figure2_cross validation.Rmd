@@ -1,0 +1,496 @@
+---
+title: "Code of Figure 2_cross-validation"
+author: 
+  - HuEn
+  - "`r Sys.Date()`"
+  
+documentclass: ctexart
+geometry: margin=0.6cm
+output:
+  rticles::ctex:
+    fig_caption: yes
+    number_sections: yes
+    toc: yes
+header-includes:
+ - \usepackage{fvextra}
+ - \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+ - \CTEXsetup[format={\huge\bfseries\raggedright}]{section}
+---
+
+# 1.Load data
+```{r}
+rm(list = ls())
+options(stringsAsFactors = F)
+pacman::p_load(magrittr, dplyr, ggplot2,ConsensusClusterPlus,survival,survminer,limma,ggalluvial,ggforce,NMF)
+source("./Function/Function.R")
+Sys.setlocale(locale = "english")
+
+## Liu cohort
+load("./2_output_data/sur_152.Rdata")
+load("./2_output_data/761sub_specfics.Rdata")
+load("./1_raw_data/1.Proteomic data/152 samples and 4032 proteins .Rdata")
+load("./1_raw_data/1.Proteomic data/152 samples and all proteins.Rdata")
+## Jiang etal's cohort
+load("./1_raw_data/1.Proteomic data/Jiang data/jiang_exp.Rdata")
+load("./1_raw_data/1.Proteomic data/Jiang data/jiang_sig.Rdata")
+load("./1_raw_data/1.Proteomic data/Jiang data/sur_data_jiang.Rdata")
+## Gao etal's cohort
+load("./1_raw_data/1.Proteomic data/Gao data/gao_exp.Rdata")
+load("./1_raw_data/1.Proteomic data/Gao data/gao_sig.Rdata")
+load("./1_raw_data/1.Proteomic data/Gao data/sur_data_gao.Rdata")
+```
+# 2. validate Gao's and Jiang's sig in Liu cohort
+## 2.1 gao's sig
+```{r}
+gao_sig_in_liudata <- dec$PG.ProteinGroups[which(dec[which(dec$PG.Genes %in% gao_sig),"PG.ProteinGroups"] %in% rownames(dataT))]
+
+result1 <- ConsensusClusterPlus(as.matrix(dataT[gao_sig_in_liudata,rownames(sur_152.data)]), maxK = 8,
+                                        reps = 1000, pItem = 1,
+                                        pFeature = 1,  
+                                        clusterAlg = 'kmdist', 
+                                        distance = 'euclidean',
+                                        title = "./3_output_figure/cross_validation/gao_sig_in_liu_data",
+                                        plot = "pdf")
+
+sub_group <- data.frame(result1[[4]]$consensusClass)
+row.names(sub_group) == row.names(sur_152.data)
+sur_152.data$gaosig832 <- sub_group[,1]
+fit <- survfit(Surv(OS.time, OS) ~ gaosig832 , sur_152.data)
+ggsurvplot(fit, sur_152.data,pval = TRUE)
+
+sur_152.data$gaosig832 <- sur_152.data$gaosig832 %>%
+  gsub("1","SI",.) %>%
+  gsub("3","SII",.) %>%
+  gsub("2|4","SIII",.)
+table(sur_152.data$sub761,sur_152.data$gaosig832)
+```
+## 2.2 Jiang's sig
+```{r}
+jiang_sig_in_liudata <- intersect(rownames(dataT),jiang_sig$Uniport)
+
+result2 <- ConsensusClusterPlus(as.matrix(dataT[jiang_sig_in_liudata,rownames(sur_152.data)]), maxK = 8,
+                                        reps = 1000, pItem = 1,
+                                        pFeature = 1,  
+                                        clusterAlg = 'kmdist', 
+                                        distance = 'euclidean',
+                                        title = "./3_output_figure/cross_validation/jiang_sig_in_liu_data",
+                                        plot = "pdf",seed=2)
+
+sub_group2 <- data.frame(result2[[3]]$consensusClass)
+row.names(sub_group2) == row.names(sur_152.data)
+sur_152.data$jiangsig679<- sub_group2[,1]
+fit <- survfit(Surv(OS.time, OS) ~ jiangsig679 , sur_152.data)
+ggsurvplot(fit, sur_152.data,pval = TRUE)
+
+sur_152.data$jiangsig679 <- sur_152.data$jiangsig679 %>%
+  gsub("1","SI",.) %>%
+  gsub("3","SII",.) %>%
+  gsub("2|4","SIII",.)
+table(sur_152.data$sub761,sur_152.data$jiangsig679 )
+```
+## 2.3 sankey plot
+```{r}
+sankey.data.liu <- data.frame(Cohort = rep(c("Liu","He","Fan"),each=152),
+                          response = c(sur_152.data$sub761,
+                                       sur_152.data$jiangsig679,
+                                       sur_152.data$gaosig832) %>% factor(.,levels = c("SIII","SII","SI")),
+                          subject = rep(c(1:152),3),
+                          freq = 1)
+sankey.data.liu <- sur_152.data[c(5:7)] %>% set_colnames(c("Liu","He","Fan")) %>%
+  mutate(freq=1) %>% gather_set_data(.,1:3)
+y.levels <- c("SIII","SII","SI")
+sankey.data.liu$Liu <- factor(sankey.data.liu$Liu,levels = y.levels)
+sankey.data.liu$He <- factor(sankey.data.liu$He,levels = y.levels)
+sankey.data.liu$Fan <- factor(sankey.data.liu$Fan,levels = y.levels)
+sankey.data.liu$y <- factor(sankey.data.liu $y,levels = y.levels)
+p2.3 <- ggplot(sankey.data.liu , aes(x%>%factor(.,levels = c("Fan","Liu","He")), id = id, split = y, value = freq)) +
+  geom_parallel_sets(aes(fill = Liu), alpha = 0.5, axis.width = 0.1,color="black") +
+  geom_parallel_sets_axes(axis.width = 0.3,
+                          #color=rep(c("#009944","#0081FF","#FB050B"),12),
+                          color="black",size=1,
+                          fill=rep(c("#228b22","#191970","#8b0000"),12)
+                         
+                          ) +
+  geom_parallel_sets_labels(colour = 'black',angle = 0) +
+  theme_minimal()+
+  scale_x_discrete(expand = c(0.05,0))+
+  coord_flip()+
+  scale_fill_manual(values = c("#8b0000","#0081ff","#009944"))+
+  theme(panel.grid = element_blank(),
+        axis.text.x = element_blank(),
+        axis.title = element_blank(),
+        legend.title = element_blank())
+cairo_pdf(filename = "./3_output_figure/F2B_3.pdf",width = 12,height = 5)
+print(p2.3)
+dev.off()
+
+```
+# 3.validate Gao's and Liu's sig in Jiang cohort
+```{r}
+jiang_dataT <- jiang_exp[,grepl("T",colnames(jiang_exp))] %>% as.data.frame()
+jiang_dataT_075 <- jiang_dataT[apply(jiang_dataT, 1, function(x){sum(!is.na(x)) >= 0.25*101}),] %>% as.data.frame()
+jiang_dataT[is.na(jiang_dataT)] <- 0.0001
+jiang_dataT <- normalizeBetweenArrays(jiang_dataT,method = "quantile") %>% as.data.frame()
+jiang_dec <- jiang_exp[,c(1,2)]
+```
+## Gao's sig
+```{r}
+gao_sig_in_jiangdata <- jiang_dec$ID[which(jiang_dec$ID[which(jiang_dec$SYMBOL %in% gao_sig)] %in% rownames(jiang_dataT))]
+
+results3 <- nmf(x = jiang_dataT[gao_sig_in_jiangdata,rownames(sur_data_jiang)],rank = 2:6,method = "nsNMF",.opt="vp10",seed=6)
+
+
+sub_group3 <- data.frame(predict(results3$fit[[2]]))
+
+row.names(sub_group3 ) == row.names(sur_data_jiang)
+sur_data_jiang$gao1218 <- sub_group3[,1]
+fit <- survfit(Surv(OS.time, OS) ~ gao1218 , sur_data_jiang)
+ggsurvplot(fit, sur_data_jiang,pval = TRUE)
+
+sur_data_jiang$gao1218 <- sur_data_jiang$gao1218%>%
+  gsub("1","SI",.) %>%
+  gsub("3","SII",.) %>%
+  gsub("2","SIII",.)
+
+table(sur_data_jiang$original_subtype,sur_data_jiang$gao1218)
+```
+## Liu‘s sig
+```{r}
+Liu_sig_in_jiangdata <- intersect(sub_specfics,jiang_dec$ID)
+
+results4 <- nmf(x = jiang_dataT[Liu_sig_in_jiangdata,rownames(sur_data_jiang)],rank = 2:6,method = "nsNMF",.opt="vp10",seed=3)
+
+
+sub_group4 <- data.frame(predict(results4$fit[[2]]))
+
+row.names(sub_group4 ) == row.names(sur_data_jiang)
+sur_data_jiang$liu721 <- sub_group4[,1]
+fit <- survfit(Surv(OS.time, OS) ~ liu721, sur_data_jiang)
+ggsurvplot(fit, sur_data_jiang,pval = TRUE)
+
+sur_data_jiang$liu721 <- sur_data_jiang$liu721%>%
+  gsub("1","SI",.) %>%
+  gsub("3","SII",.) %>%
+  gsub("2","SIII",.)
+
+table(sur_data_jiang$liu721,sur_data_jiang$original_subtype)
+```
+# 4. validate liu's and jiang's sig in gao cohort
+## 4.1 Liu's sig
+```{r}
+liu_sig_in_gaodata <-  dec$PG.Genes[which(dec$PG.ProteinGroups %in% intersect(dec$PG.ProteinGroups[which(dec$PG.Genes %in% rownames(gao_exp))],sub_specfics))]
+
+result5 <- ConsensusClusterPlus(as.matrix(gao_exp[liu_sig_in_gaodata,rownames(sur_data_gao)]), maxK = 6,
+                                                     reps = 1000, pItem = 1,
+                                                     pFeature = 1,  
+                                                     clusterAlg = 'km', 
+                                                     distance = 'euclidean',
+                                                     title = "./3_output_figure/cross_validation/liu_sig_ingao_data",
+                                                     plot = "pdf")
+
+sub_group5 <- data.frame(result5[[3]]$consensusClass)
+row.names(sub_group5) == row.names(sur_data_gao)
+sur_data_gao$liu680 <- sub_group5[,1]
+fit <- survfit(Surv(OS.time, OS) ~ liu680 , sur_data_gao)
+ggsurvplot(fit, sur_data_gao,pval = TRUE)
+
+sur_data_gao$liu680 <- sur_data_gao$liu680 %>%
+  gsub("1","SI",.) %>%
+  gsub("2","SII",.) %>%
+  gsub("3","SIII",.)
+table(sur_data_gao$liu680,sur_data_gao$origina_subtype)
+```
+## 4.2 jiang's sig
+```{r}
+
+
+jiang_sig_in_gaodata <-  intersect(jiang_sig$SYMBOL,rownames(gao_exp))
+
+
+result6 <- ConsensusClusterPlus(as.matrix(gao_exp[jiang_sig_in_gaodata,rownames(sur_data_gao)]), maxK = 6,
+                                                     reps = 1000, pItem = 1,
+                                                     pFeature = 1,  
+                                                     clusterAlg = 'km', 
+                                                     distance = 'euclidean',
+                                                     title = "./3_output_figure/cross_validation/jiang_sig_ingao_data",
+                                                     plot = "pdf",seed=2)
+
+sub_group6 <- data.frame(result6[[3]]$consensusClass)
+row.names(sub_group6) == row.names(sur_data_gao)
+sur_data_gao$jiang1151 <- sub_group6[,1]
+fit <- survfit(Surv(OS.time, OS) ~ jiang1151 , sur_data_gao)
+ggsurvplot(fit, sur_data_gao,pval = TRUE)
+
+sur_data_gao$jiang1151 <- sur_data_gao$jiang1151 %>%
+  gsub("1","SI",.) %>%
+  gsub("2","SII",.) %>%
+  gsub("3","SIII",.)
+table(sur_data_gao$jiang1151,sur_data_gao$origina_subtype)
+```
+# 5. Figure2
+## 5.1 Figure 2B_1
+```{r}
+legend_label <- data.frame(table(sur_152.data$jiangsig679)) %$% 
+  paste0(Var1,": ","n=",Freq)
+fit <- survfit(Surv(OS.time,OS)~jiangsig679,sur_152.data)
+cairo_pdf(filename  = "./3_output_figure/F2B_1.pdf",width = 6,height = 5)
+F.plot_surival(fit_object = fit,
+             surivaldata = sur_152.data, 
+             ytitle = OS, legend_text =  legend_label,palettes = c("forestgreen","midnightblue","red4")
+)
+dev.off()
+```
+## 5.2 figure 2B_2
+```{r}
+legend_label <- data.frame(table(sur_152.data$gaosig832)) %$% 
+  paste0(Var1,": ","n=",Freq)
+fit <- survfit(Surv(OS.time,OS)~gaosig832,sur_152.data)
+cairo_pdf(filename = "./3_output_figure/F2B_2.pdf",width = 6,height = 5)
+F.plot_surival(fit_object = fit,
+             surivaldata = sur_152.data, 
+             ytitle = OS, legend_text =  legend_label,palettes = c("forestgreen","midnightblue","red4")
+)
+dev.off()
+```
+## 5.3 Figure2B_1_HR
+```{r}
+F.pasteHR <- function(conf.int){
+  paste0(round(conf.int[1],2),"(",round(conf.int[3],2),"-",round(conf.int[4],2),")")
+}
+
+SIIvsSI = coxph(Surv(OS.time,OS)~jiangsig679,sur_152.data[sur_152.data$jiangsig679!="SIII",]) %>% summary()
+SIIIvsSI = coxph(Surv(OS.time,OS)~jiangsig679,sur_152.data[sur_152.data$jiangsig679!="SII",]) %>% summary()
+SIIIvsSII = coxph(Surv(OS.time,OS)~jiangsig679,sur_152.data[sur_152.data$jiangsig679!="SI",]) %>% summary()
+
+#########plot
+
+data.frame(#subtypes = c("SI","SII","SIII"),
+           SI = c("",SIIvsSI$logtest[3]%>% round(.,4),SIIIvsSI$logtest[3]%>% round(.,4)),
+           SII = c(F.pasteHR(SIIvsSI$conf.int),"",SIIIvsSII$logtest[3]%>% round(.,4)),
+           SIII = c(F.pasteHR(SIIIvsSI$conf.int),F.pasteHR(SIIIvsSII$conf.int),"")
+           ) %>% 
+ggtexttable(rows = c("SI","SII","SIII"),cols=c("SI","SII","SIII"),
+            theme = ttheme(colnames.style=colnames_style(color = "black",face = "bold",size = 12,fill = "grey80",linewidth = 1,
+  linecolor = "white"),rownames.style=rownames_style(  color = "black",
+  face = "bold",
+  size = 12,
+  fill = "grey80",
+  linewidth = 1,
+  linecolor = "white"))) %>%
+ table_cell_bg(row = c(3),column = c(2),fill= ggplot2::alpha("#79AF97FF",0.6)) %>%
+      table_cell_bg(row = c(4),column = c(2),fill=ggplot2::alpha("#79AF97FF",0.6)) %>%
+      table_cell_bg(row = c(4),column = c(3),fill=ggplot2::alpha("#79AF97FF",0.6))  %>%
+      table_cell_bg(row = c(2),column = c(3),fill=ggplot2::alpha("#B24745FF",0.6)) %>%
+      table_cell_bg(row = c(2),column = c(4),fill=ggplot2::alpha("#B24745FF",0.6)) %>%
+      table_cell_bg(row = c(3),column = c(4),fill=ggplot2::alpha("#B24745FF",0.6))-> x
+cairo_pdf(file = "./3_output_figure/F2B_1_HR.pdf",width = 6,height = 5)
+x$theme$text$family="TNR"
+print(x)
+dev.off()
+```
+## 5.4 Figure2B_2_HR
+```{r}
+F.pasteHR <- function(conf.int){
+  paste0(round(conf.int[1],2),"(",round(conf.int[3],2),"-",round(conf.int[4],2),")")
+}
+
+SIIvsSI = coxph(Surv(OS.time,OS)~gaosig832,sur_152.data[sur_152.data$gaosig832!="SIII",]) %>% summary()
+SIIIvsSI = coxph(Surv(OS.time,OS)~gaosig832,sur_152.data[sur_152.data$gaosig832!="SII",]) %>% summary()
+SIIIvsSII = coxph(Surv(OS.time,OS)~gaosig832,sur_152.data[sur_152.data$gaosig832!="SI",]) %>% summary()
+
+#########plot
+
+data.frame(#subtypes = c("SI","SII","SIII"),
+           SI = c("",SIIvsSI$logtest[3]%>% round(.,4),SIIIvsSI$logtest[3]%>% round(.,4)),
+           SII = c(F.pasteHR(SIIvsSI$conf.int),"",SIIIvsSII$logtest[3]%>% round(.,4)),
+           SIII = c(F.pasteHR(SIIIvsSI$conf.int),F.pasteHR(SIIIvsSII$conf.int),"")
+           ) %>% 
+ggtexttable(rows = c("SI","SII","SIII"),cols=c("SI","SII","SIII"),
+            theme = ttheme(colnames.style=colnames_style(color = "black",face = "bold",size = 12,fill = "grey80",linewidth = 1,
+  linecolor = "white"),rownames.style=rownames_style(  color = "black",
+  face = "bold",
+  size = 12,
+  fill = "grey80",
+  linewidth = 1,
+  linecolor = "white"))) %>%
+ table_cell_bg(row = c(3),column = c(2),fill= ggplot2::alpha("#79AF97FF",0.6)) %>%
+      table_cell_bg(row = c(4),column = c(2),fill=ggplot2::alpha("#79AF97FF",0.6)) %>%
+      table_cell_bg(row = c(4),column = c(3),fill=ggplot2::alpha("#79AF97FF",0.6))  %>%
+      table_cell_bg(row = c(2),column = c(3),fill=ggplot2::alpha("#B24745FF",0.6)) %>%
+      table_cell_bg(row = c(2),column = c(4),fill=ggplot2::alpha("#B24745FF",0.6)) %>%
+      table_cell_bg(row = c(3),column = c(4),fill=ggplot2::alpha("#B24745FF",0.6))-> x
+cairo_pdf(file = "./3_output_figure/F2B_2_HR.pdf",width = 6,height = 5)
+x$theme$text$family="TNR"
+print(x)
+dev.off()
+```
+## 5.5 figure2C_1
+```{r}
+confusion_matrix2c1 <- as.data.frame(table(sur_data_gao$origina_subtype,
+                                         sur_data_gao$liu680))
+cairo_pdf( filename = "./3_output_figure/F2C_1.pdf",width = 12,height = 12)
+F.plot_confusion(data = confusion_matrix2c1, xlab = "Accuracy: 78.6%",
+               ylab = "Our predicted subtype", title_text = "Gao et al. subtype")
+dev.off()
+```
+## 5.6 figure2C_2
+```{r}
+confusion_matrix2c2 <- as.data.frame(table(sur_data_jiang$original_subtype,
+                                         sur_data_jiang$liu721))
+cairo_pdf( filename = "./3_output_figure/F2C_2.pdf",width = 12,height = 12)
+F.plot_confusion(data = confusion_matrix2c2, xlab = "Accuracy: 81.1%",
+               ylab = "Our predicted subtype", title_text = "Jiang et al. subtype")
+dev.off()
+```
+## 5.7 figure2C_3
+```{r}
+confusion_matrix2c3 <- as.data.frame(table(sur_data_gao$origina_subtype,
+                                         sur_data_gao$jiang1151))
+cairo_pdf( filename = "./3_output_figure/F2C_3.pdf",width = 12,height = 12)
+F.plot_confusion(data = confusion_matrix2c3, xlab = "Accuracy: 77.9%",
+               ylab = "Jiang et al. predicted subtype", title_text = "Gao et al. subtype")
+dev.off()
+```
+## 5.8 figure2C_4
+```{r}
+confusion_matrix2c4 <- as.data.frame(table(sur_data_jiang$original_subtype,
+                                         sur_data_jiang$gao1218))
+cairo_pdf( filename = "./3_output_figure/F2C_4.pdf",width = 12,height = 12)
+F.plot_confusion(data = confusion_matrix2c4, xlab = "Accuracy: 88.1%",
+               ylab = "Gao et al. predicted subtype", title_text = "Jiang et al. subtype")
+dev.off()
+```
+## 5.9 figureS5B_1
+```{r}
+legend_label <- data.frame(table(sur_data_gao$liu680)) %$% 
+  paste0(Var1,": ","n=",Freq)
+fit <- survfit(Surv(OS.time,OS)~liu680,sur_data_gao)
+cairo_pdf(filename  = "./3_output_figure/F5B_1_Liu_in_gao.pdf",width = 6,height = 5)
+F.plot_surival(fit_object = fit,
+             surivaldata = sur_data_gao, 
+             ytitle = OS, legend_text =  legend_label,palettes = c("forestgreen","midnightblue","red4")
+)
+dev.off()
+```
+## 5.91 figureS5B_2
+```{r}
+legend_label <- data.frame(table(sur_data_jiang$liu721)) %$% 
+  paste0(Var1,": ","n=",Freq)
+fit <- survfit(Surv(OS.time,OS)~liu721,sur_data_jiang)
+cairo_pdf(filename  = "./3_output_figure/FS5B_2_liu_in_jiang.pdf",width = 6,height = 5)
+F.plot_surival(fit_object = fit,
+             surivaldata = sur_data_jiang, 
+             ytitle = OS, legend_text =  legend_label,palettes = c("forestgreen","midnightblue","red4")
+)
+dev.off()
+
+```
+## 5.92 figureS5C1
+```{r}
+legend_label <- data.frame(table(sur_data_gao$jiang1151)) %$% 
+  paste0(Var1,": ","n=",Freq)
+fit <- survfit(Surv(OS.time,OS)~jiang1151,sur_data_gao)
+cairo_pdf(filename  = "./3_output_figure/F5C_1_jiang_in_gao.pdf",width = 6,height = 5)
+F.plot_surival(fit_object = fit,
+             surivaldata = sur_data_gao, 
+             ytitle = OS, legend_text =  legend_label,palettes = c("forestgreen","midnightblue","red4")
+)
+dev.off()
+```
+## 5.93 figureS5C_2
+```{r}
+legend_label <- data.frame(table(sur_data_jiang$gao1218)) %$% 
+  paste0(Var1,": ","n=",Freq)
+fit <- survfit(Surv(OS.time,OS)~gao1218,sur_data_jiang)
+cairo_pdf(filename  = "./3_output_figure/FS5C_2_Gao_in_jiang.pdf",width = 6,height = 5)
+F.plot_surival(fit_object = fit,
+             surivaldata = sur_data_jiang, 
+             ytitle = OS, legend_text =  legend_label,palettes = c("forestgreen","midnightblue","red4")
+)
+dev.off()
+```
+# 6.FigureS5
+## 6.1 FS5_A
+```{r}
+library(UpSetR)
+upsetlist <- list("This_sig"=dec$PG.Genes[which(dec$PG.ProteinGroups %in% sub_specfics)],
+                  "This_cohort" = dec$PG.Genes[which(dec$PG.ProteinGroups %in% rownames(dataT))],
+                  "Gao_et_al._cohort" = rownames(gao_exp),
+                  "Gao_et_al._sig" = gao_sig,
+                  "Jiang_et_al._cohort" = jiang_dec$SYMBOL,
+                  "Jiang_et_al._sig" = jiang_sig$SYMBOL) %>% fromList()
+
+matrix(data = NA,nrow = 6,ncol = 6) %>% as.data.frame() %>% set_colnames(paste0("X",c(1:6))) %>%
+  set_rownames(c("This_sig","Gao_et_al._cohort","Gao_et_al._sig",
+               "This_cohort","Jiang_et_al._cohort","Jiang_et_al._sig")) %>% mutate(Y=c("This_sig","Gao_et_al._cohort","Gao_et_al._sig",
+               "This_cohort","Jiang_et_al._cohort","Jiang_et_al._sig")) %>% reshape2::melt(id.vars="Y") -> out
+write.csv(out,"out.csv")
+out2 <- read.csv("./out.csv")
+
+ out2 %>%  mutate(Y=factor(Y,
+               levels = rev(c("This_sig","Jiang_et_al._sig","Gao_et_al._sig",
+                          "This_cohort","Gao_et_al._cohort","Jiang_et_al._cohort")))) %>%
+  ggplot(aes(x=variable,y=Y))+
+  theme_cleveland()+
+  theme(plot.background = element_blank(),
+        panel.background = element_blank(),
+        panel.grid = element_blank(),
+        panel.grid.major.y = element_blank())+
+    geom_rect(xmin=-Inf,xmax=Inf,ymin=5,ymax=6,fill=alpha("grey95",0.1))+
+  geom_rect(xmin=-Inf,xmax=Inf,ymin=3,ymax=4,fill=alpha("grey95",0.1))+
+  geom_rect(xmin=-Inf,xmax=Inf,ymin=1,ymax=2,fill=alpha("grey95",0.1))+
+  geom_point(aes(color=color),size=2)+
+  geom_segment(x="X1",xend="X1",y=1,yend=4)+
+  geom_segment(x="X2",xend="X2",y=2,yend=5)+
+  geom_segment(x="X3",xend="X3",y=3,yend=4)+
+  geom_segment(x="X4",xend="X4",y=1,yend=6)+
+  geom_segment(x="X5",xend="X5",y=2,yend=6)+
+  geom_segment(x="X6",xend="X6",y=3,yend=5)+
+   scale_color_manual(values = c("grey","black"))->p6.1.1
+ data.frame(X=paste0("X",c(1:6)),
+            Y=c(1218,1151,832,721,680,679))%>%
+   ggplot(aes(x=X,y=Y))+
+   geom_bar(stat = "identity",width = 0.4)+
+   theme_classic()+
+   scale_y_continuous(expand = c(0,0,0.1,0))+
+   geom_text(aes(x=X,y=Y+50,label=Y))+
+   theme(axis.title.x = element_blank(),
+         axis.ticks.x = element_blank(),
+         axis.text.x = element_blank())+
+   labs(y="intersection size")->p6.1.2
+```
+#7. figure2E
+```{r}
+radar.data <- data.frame("Jiang Cohort_Liu sig"=c(sum(sur_data_jiang$original_subtype=="SI"&sur_data_jiang$liu721=="SI")/49,
+                                    sum(sur_data_jiang$original_subtype=="SII"&sur_data_jiang$liu721=="SII")/26,
+                                      sum(sur_data_jiang$original_subtype=="SIII"&sur_data_jiang$liu721=="SIII")/26),
+           "Jiang Cohort_Gao sig"=c(sum(sur_data_jiang$original_subtype=="SI"&sur_data_jiang$gao1218=="SI")/36,
+                                    sum(sur_data_jiang$original_subtype=="SII"&sur_data_jiang$gao1218=="SII")/34,
+                                      sum(sur_data_jiang$original_subtype=="SIII"&sur_data_jiang$gao1218=="SIII")/31),
+           "Liu Cohort_Jiang sig"=c(sum(sur_152.data$sub761=="SI"&sur_152.data$jiangsig679=="SI")/50,
+                                    sum(sur_152.data$sub761=="SII"&sur_152.data$jiangsig679=="SII")/67,
+                                      sum(sur_152.data$sub761=="SIII"&sur_152.data$jiangsig679=="SIII")/35),
+           "Liu Cohort_Gao sig"=c(sum(sur_152.data$sub761=="SI"&sur_152.data$gaosig832=="SI")/54,
+                                    sum(sur_152.data$sub761=="SII"&sur_152.data$gaosig832=="SII")/46,
+                                      sum(sur_152.data$sub761=="SIII"&sur_152.data$gaosig832=="SIII")/52),
+           "Gao Cohort_Liu sig"=c(sum(sur_data_gao$origina_subtype=="SI"&sur_data_gao$liu680=="SI")/62,
+                                    sum(sur_data_gao$origina_subtype=="SII"&sur_data_gao$liu680=="SII")/65,
+                                      sum(sur_data_gao$origina_subtype=="SIII"&sur_data_gao$liu680=="SIII")/32),
+           "Gao Cohort_Jiang sig"=c(sum(sur_data_gao$origina_subtype=="SI"&sur_data_gao$jiang1151=="SI")/56,
+                                    sum(sur_data_gao$origina_subtype=="SII"&sur_data_gao$jiang1151=="SII")/51,
+                                      sum(sur_data_gao$origina_subtype=="SIII"&sur_data_gao$jiang1151=="SIII")/52)) %>% 
+  t() %>% set_colnames(c("SI","SII","SIII")) %>% cbind(data.frame(group=c("Jiang Cohort_Liu sig","Jiang Cohort_Gao sig","Liu Cohort_Jiang sig","Liu Cohort_Gao sig", "Gao Cohort_Liu sig","Gao Cohort_Jiang sig")),.)
+library(ggradar)
+p7 <- ggradar(radar.data,group.colours = c("#8f7700","#efc000",
+                                "#003c67","#a73030",
+                                "#cd534c","#0073c2"),group.point.size = 1,group.line.width = 1
+                                )
+cairo_pdf(filename = "./3_output_figure/F2_E.pdf")
+p7
+dev.off()
+```
+# save
+```{r}
+#save(list = ls(),file = "3.figure2.Rdata")
+load("3.figure2.Rdata")
+````

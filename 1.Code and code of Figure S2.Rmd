@@ -1,0 +1,40 @@
+---
+title: "Code and code of Figure S2 "
+author: 
+  - HuEn
+  - "`r Sys.Date()`"
+  
+documentclass: ctexart
+geometry: margin=0.6cm
+output:
+  rticles::ctex:
+    fig_caption: yes
+    number_sections: yes
+    toc: yes
+header-includes:
+ - \usepackage{fvextra}
+ - \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+ - \CTEXsetup[format={\huge\bfseries\raggedright}]{section}
+---
+
+# 1.Global settings
+
+```{r}
+options(stringsAsFactors = F)
+pacman::p_load(stringr,magrittr)
+windowsFonts(TNR=windowsFont("Times New Roman"))
+Sys.setlocale(locale = "English")
+```
+# 2. Load data
+
+```{r}
+p_rawdata <- read.csv("./1_raw_data/1.Proteomic data/1_152 samples' HCC proteomic data from spectronaut.csv")
+load("1_raw_data/1.Proteomic data/152.Rdata")
+p_rawdata.back <- p_rawdata
+sample_names <- colnames(p_rawdata)[7:314] %>% str_extract(.,"[0-9]{3,4}[TN]")
+## check duplicate names
+duplicated(sample_names) %>% sum()
+which(sample_names %in% colnames(dataTN))  %>% length()
+p_newdata <- cbind(p_rawdata[1:6],p_rawdata[colnames(p_rawdata)[which(sample_names %in% colnames(dataTN)) ]])
+```
+

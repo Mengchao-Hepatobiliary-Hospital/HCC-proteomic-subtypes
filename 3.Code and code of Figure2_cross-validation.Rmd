@@ -1,0 +1,86 @@
+---
+title: "Code of Figure 2_cross-validation"
+author: 
+  - HuEn
+  - "`r Sys.Date()`"
+  
+documentclass: ctexart
+geometry: margin=0.6cm
+output:
+  rticles::ctex:
+    fig_caption: yes
+    number_sections: yes
+    toc: yes
+header-includes:
+ - \usepackage{fvextra}
+ - \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+ - \CTEXsetup[format={\huge\bfseries\raggedright}]{section}
+---
+
+# 1.Load data
+```{r}
+#rm(list = ls())
+options(stringsAsFactors = F)
+pacman::p_load(magrittr, dplyr, ggplot2)
+source("./Function/Function.R")
+Sys.setlocale(locale = "English")
+
+## Liu cohort
+load("./2_output_data/sur_152.Rdata")
+load("./2_output_data/761sub_specfics.Rdata")
+load("./1_raw_data/1.Proteomic data/152 samples and 4032 proteins .Rdata")
+load("./1_raw_data/1.Proteomic data/152 samples and all proteins.Rdata")
+## Jiang etal's cohort
+load("./1_raw_data/1.Proteomic data/Jiang data/jiang_exp.Rdata")
+load("./1_raw_data/1.Proteomic data/Jiang data/jiang_sig.Rdata")
+load("./1_raw_data/1.Proteomic data/Jiang data/sur_data_jiang.Rdata")
+## Gao etal's cohort
+load("./1_raw_data/1.Proteomic data/Gao data/gao_exp.Rdata")
+load("./1_raw_data/1.Proteomic data/Gao data/gao_sig.Rdata")
+load("./1_raw_data/1.Proteomic data/Gao data/sur_data_gao.Rdata")
+```
+# 2. validate Gao's and Jiang's sig in Liu cohort
+## 2.1 Gao's sig
+```{r}
+gao_sig_in_liudata <- dec$PG.ProteinGroups[which(dec[which(dec$PG.Genes %in% gao_sig),"PG.ProteinGroups"] %in% rownames(dataT))]
+
+result1 <- ConsensusClusterPlus(as.matrix(dataT[gao_sig_in_liudata,rownames(sur_152.data)]), maxK = 8,
+                                        reps = 1000, pItem = 0.8,
+                                        pFeature = 0.8,  
+                                        clusterAlg = 'kmdist', 
+                                        distance = 'euclidean',
+                                        title = "./3_output_figure/cross_validation/gao_sig_in_liu_data",
+                                        plot = "pdf")
+
+sub_group <- data.frame(result1[[4]]$consensusClass)
+row.names(sub_group) == row.names(sur_152.data)
+sur_152.data$fansig832 <- sub_group[,1]
+fit <- survfit(Surv(OS.time, OS) ~ fansig832 , sur_152.data)
+ggsurvplot(fit, sur_152.data,pval = TRUE)
+
+sur_152.data$fansig832 <- sur_152.data$fansig832 %>%
+  gsub("1","SI",.) %>%
+  gsub("3","SII",.) %>%
+  gsub("2|4","SIII",.)
+###绘制生存曲线
+legend_label <- data.frame(table(sur_152.data$fansig832)) %$% 
+  paste0(Var1,": ","n=",Freq)
+fit <- survfit(Surv(OS.time, OS) ~ fansig832 ,sur_152.data)
+png(paste0(out_directory,
+           "liu_sig761_in_liu_cohort/","liu cohort fan sig832_3 OS.png"),
+    width = 906, height = 637, res = 100)
+F.plot_surival(fit_object = fit,
+             surivaldata = sur_152.data, 
+             ytitle = OS, legend_text =  legend_label 
+)
+dev.off()
+fit <- survfit(Surv(RFS.time, RFS) ~ Subtype_70sample_fansig832_3 ,sur_data_70)
+png(paste0(out_directory,
+           "liu_sig761_in_liu_cohort/","liu cohort fan sig832 RFS_3.png"),
+    width = 906, height = 637, res = 100)
+plot_surival(fit_object = fit,
+             surivaldata = sur_data_70, 
+             ytitle = RFS, legend_text =  legend_label 
+             
+)
+```
