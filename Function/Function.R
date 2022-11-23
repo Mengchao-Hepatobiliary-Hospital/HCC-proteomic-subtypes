@@ -166,3 +166,20 @@ F.plot_confusion <- function(data,xlab,ylab,title_text,s=8){
           plot.title = element_text(size = 22,hjust = 0.5)
     )
 }
+#----------------------------------------------------------
+no_name <- function(gmt.list){
+  as.character(unlist(strsplit(gmt.list,
+                               split="\t",fixed = T
+  )))[-2]
+}
+
+F.gmt_fix <- function(gmt){
+  database_list_gsva <- lapply(gmt, no_name)
+  for(i in 1:length(database_list_gsva)){
+    
+    names(database_list_gsva)[i] <- database_list_gsva[i][[1]][1]
+    database_list_gsva[i][[1]] <- database_list_gsva[i][[1]][-1]
+  }
+  return(database_list_gsva)
+}
+#-----------------------------------------------

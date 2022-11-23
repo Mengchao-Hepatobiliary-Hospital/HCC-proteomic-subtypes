@@ -1,0 +1,654 @@
+---
+title: "HCC proteomic subtypes related code"
+author:
+  - En Hu
+keywords:
+  - subtype
+  - HCC 
+  - proteomics
+documentclass: ctexart
+geometry: margin=0.6cm
+output:
+  rticles::ctex:
+    fig_caption: yes
+    number_sections: yes
+    toc: yes
+header-includes:
+ - \usepackage{fvextra}
+ - \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+ - \CTEXsetup[format={\huge\bfseries\raggedright}]{section}
+---
+
+# Environment
+```{r}
+knitr::opts_chunk$set(warning = FALSE)
+options(stringsAsFactors = F)
+Sys.setlocale(locale = "English")
+pacman::p_load(magrittr, dplyr,ggpubr,aplot,clusterProfiler,GSVA,factoextra,ggalluvial,ConsensusClusterPlus,survival,survminer)
+source("Function/Function.R")
+```
+# 1. Input data
+## 1.1 Training set
+```{r}
+load("1_raw_data/1.Proteomic data/sur_data_44.Rdata")
+load("1_raw_data/1.Proteomic data/train set clinicopathoglogic.Rdata")
+```
+## 1.2 Validtion set
+```{r}
+load("1_raw_data/1.Proteomic data/sur_data_108.Rdata")
+```
+## 1.3 All samples
+```{r}
+load("1_raw_data/1.Proteomic data/sur_data_152.Rdata")
+load("1_raw_data/1.Proteomic data/152 samples and 4032 proteins .Rdata")
+load("1_raw_data//1.Proteomic data/152 samples and all proteins.Rdata")
+```
+## 1.4 Kegg database downloaded from GSEA Official website
+```{r}
+gmt_kegg <- readLines("./1_raw_data/1.Proteomic data/c2.cp.kegg.v7.4.entrez.gmt")
+kegg_list <- F.gmt_fix(gmt_kegg)
+```
+## 1.5 Kegg feature classification
+```{r}
+kegg_class <- read.csv("./1_raw_data/1.Proteomic data/kegg_class.csv")
+```
+
+# 2. HCC proteomic subtypes in train set(108 samples)\
+
+## 2.1 Split data set
+```{r}
+train_set <- tumor_exp[rownames(sur_data_108)]
+valid_set <- tumor_exp[rownames(sur_data_44)]
+```
+## 2.2 Fearure section
+
+```{r}
+## median absolute deviation
+mad_train_set_1500 <- rownames(train_set[order(apply(train_set,1,mad), decreasing = T)[1:1500],])
+
+## proteins identified in more than 80% samples
+proteins_80 <- rownames(raw_exp)[apply(raw_exp[colnames(train_set)],1,function(x) sum(!is.na(x)))>=108*0.8]
+
+feature <- intersect(mad_train_set_1500,proteins_80)
+```
+
+## 2.3 Consensuscluster
+
+```{r}
+train_result <- ConsensusClusterPlus(as.matrix(train_set[feature,]), maxK = 8,
+                                                           reps = 1000, pItem = 0.8,
+                                                           pFeature = 0.8,  
+                                                           clusterAlg = 'kmdist', 
+                                                           distance = 'euclidean',
+                                                           title ="./3_output_figure/liu_sig1128_108sample",
+                                                           plot = "pdf"
+                                                            )
+
+sub_group <- data.frame(train_result[[4]]$consensusClass)
+
+sur_data_108$train_set_1128 <- sub_group[,1]
+fit <- survfit(Surv(OS.time, OS) ~ train_set_1128, sur_data_108)
+#ggsurvplot(fit, sur_data_,pval = TRUE)
+#绘制热图
+sur_data_108$train_set_1128 <- sur_data_108$train_set_1128 %>%
+  gsub("1","SI",.) %>% 
+  gsub("3","SII",.) %>%
+  gsub("2","SIII",.) %>%
+  gsub("4", "SIII",.)
+```
+## 2.4 Subtype-specfic proteins
+
+```{r}
+SI = which(colnames(train_set) %in% rownames(sur_data_108)[sur_data_108$train_set_1128=="SI"])
+SII = which(colnames(train_set) %in% rownames(sur_data_108)[sur_data_108$train_set_1128=="SII"])
+SIII = which(colnames(train_set) %in% rownames(sur_data_108)[sur_data_108$train_set_1128=="SIII"])
+
+subtype_dep <- apply(train_set,1,function(p){
+  data.frame(SIIvsSI.p = wilcox.test(p[SI],p[SII])[[3]],
+             SIIvsSI.FC = mean(2^p[SII])/mean(2^p[SI]),
+             SIIIvsSII.p = wilcox.test(p[SII],p[SIII])[[3]],
+             SIIIvsSII.FC = mean(2^p[SIII])/mean(2^p[SII]),
+             SIIIvsSI.p = wilcox.test(p[SIII],p[SI])[[3]],
+             SIIIvsSI.FC = mean(2^p[SIII])/mean(2^p[SI])
+             )
+}) %>% do.call(rbind,.)
+
+sub_spec <- filter(subtype_dep,(SIIvsSI.p<0.01&(SIIvsSI.FC >2 |SIIvsSI.FC <0.5))|
+                                  (SIIIvsSII.p<0.01&(SIIIvsSII.FC >2 |SIIIvsSII.FC <0.5))|
+                                 (SIIIvsSI.p<0.01&(SIIIvsSI.FC >2 |SIIIvsSI.FC <0.5)))
+
+sub_specfics <- intersect(rownames(sub_spec),proteins_80)
+```
+## 2.5 Subtypes identified by sub_specfic proteins(761)
+```{r}
+train_result2 <- ConsensusClusterPlus(as.matrix(train_set[sub_specfics,]), maxK = 8,
+                                                           reps = 1000, pItem = 0.8,
+                                                           pFeature = 0.8,  
+                                                           clusterAlg = 'kmdist', 
+                                                           distance = 'euclidean',
+                                                           title ="./3_output_figure/liu_sig761_108sample",
+                                                           plot = "pdf"
+                                                            )
+
+sub_group2 <- data.frame(train_result2[[4]]$consensusClass)
+sur_data_108$train_set_761 <- sub_group[,1]
+fit <- survfit(Surv(OS.time, OS) ~ train_set_761, sur_data_108)
+#ggsurvplot(fit, sur_data_108,pval = TRUE)
+#绘制热图
+sur_data_108$train_set_761 <- sur_data_108$train_set_761 %>%
+  gsub("1","SI",.) %>% 
+  gsub("3","SII",.) %>%
+  gsub("2","SIII",.) %>%
+  gsub("4", "SIII",.)
+```
+Subtype1(1128 proteins) and Subtype2(761) are 100% similar in train set
+```{r}
+table(sur_data_108$train_set_1128, sur_data_108$train_set_761)
+```
+
+# 4. Subtypes used 1128 or 761 proetin in valid_set
+## 4.1 1128 proetins
+```{r}
+valid_result <- ConsensusClusterPlus(as.matrix(valid_set[feature,]), maxK = 8,
+                                                           reps = 1000, pItem = 0.8,
+                                                           pFeature = 0.8,  
+                                                           clusterAlg = 'kmdist', 
+                                                           distance = 'euclidean',
+                                                           title ="./3_output_figure/liu_sig1128_44samples",
+                                                           plot = "pdf"
+                                                            )
+
+sub_group3 <- data.frame(valid_result[[4]]$consensusClass)
+sur_data_44$valid_set_1128 <- sub_group3[,1]
+fit <- survfit(Surv(OS.time, OS) ~ valid_set_1128, sur_data_44)
+#ggsurvplot(fit, sur_data_44,pval = TRUE)
+#绘制热图
+sur_data_44$valid_set_1128 <- sur_data_44$valid_set_1128 %>%
+  gsub("1","SI",.) %>% 
+  gsub("2","SII",.) %>%
+  gsub("3","SIII",.) %>%
+  gsub("4", "SIII",.)
+
+```
+## 4.2 761 proteins
+```{r}
+valid_result2 <- ConsensusClusterPlus(as.matrix(valid_set[sub_specfics,]), maxK = 8,
+                                                           reps = 1000, pItem = 0.8,
+                                                           pFeature = 0.8,  
+                                                           clusterAlg = 'kmdist', 
+                                                           distance = 'euclidean',
+                                                           title ="./3_output_figure/liu_sig761_44percentsample",
+                                                           plot = "pdf"
+                                                            )
+
+sub_group4 <- data.frame(valid_result2[[4]]$consensusClass)
+sur_data_44$valid_set_761 <- sub_group4[,1]
+fit <- survfit(Surv(OS.time, OS) ~ valid_set_761, sur_data_44)
+#ggsurvplot(fit, sur_data_44,pval = TRUE)
+sur_data_44$valid_set_761 <- sur_data_44$valid_set_761 %>%
+  gsub("1","SI",.) %>% 
+  gsub("2","SII",.) %>%
+  gsub("3","SIII",.) %>%
+  gsub("4", "SIII",.)
+```
+Subtype1(1128 proteins) and Subtype2(761) are 90.9% similar in valid set
+```{r}
+table(sur_data_44$train_set_1128, sur_data_44$train_set_761)
+```
+# 5. 152 samples’ subtype
+```{r}
+sur_data_152$sub761 <- c(sur_data_108[rownames(sur_data_108),"train_set_761"] %>% na.omit(),
+                         sur_data_44[rownames(sur_data_44),"valid_set_761"] %>% na.omit())
+```
+
+# 6. Figure1A & Figure1B
+## 6.1 Figure1A
+### 6.1.1 Heatmap
+```{r}
+p61.anno <- data.frame(sample=rownames(sur_data_108),
+                       sub=sur_data_108$train_set_761)
+
+## sample_order
+SI = which(colnames(train_set) %in% rownames(sur_data_108)[sur_data_108$train_set_1128=="SI"])
+SII = which(colnames(train_set) %in% rownames(sur_data_108)[sur_data_108$train_set_1128=="SII"])
+SIII = which(colnames(train_set) %in% rownames(sur_data_108)[sur_data_108$train_set_1128=="SIII"])
+train_set_order <- c(SI,SII,SIII) %>% colnames(train_set)[.]
+
+## annotation
+ggplot(p61.anno,aes(x=sample%>%factor(.,levels=train_set_order),y="",fill=sub))+
+  geom_tile()+
+  theme_void()+
+  scale_fill_manual(values = c("forestgreen","midnightblue","red4"))->p61.1
+
+## expression
+p61.exp <- train_set[sub_specfics,] %>%  t() %>% scale() %>% t() %>% as.data.frame()
+p61.exp[p61.exp < -2] <- -2; p61.exp[p61.exp > 2 ]<- 2
+
+## gene order
+gene_order <- dist(p61.exp) %>% hclust() %>%  use_series(order) %>% rownames(p61.exp)[.]
+
+p61.2.plot.data <- p61.exp %>% mutate(gene=rownames(p61.exp)) %>%
+  reshape2::melt(id.vars="gene") %>% 
+  mutate(sample = factor(variable,levels = train_set_order)) %>%
+  mutate(gene = factor(gene,levels = gene_order)) %>%
+  mutate(sub = sur_data_108[variable,"train_set_761"])
+
+## plot
+ggplot(p61.2.plot.data,aes(x=sample,y=gene,fill=value))+
+  geom_tile()+
+  theme_bw()+
+  scale_fill_gradientn(colours = colorRampPalette(c("forestgreen", "grey0", "red2"))(200))+
+  theme(axis.text = element_blank(),
+        axis.title = element_blank(),
+        panel.grid = element_blank(),
+        axis.ticks = element_blank())+
+  labs(fill="Expression")-> p61.2
+
+p61.2 %>% insert_top(p61.1,height = 0.05) -> Figure1A_part1
+```
+### 6.1.2 Clinicopathoglogic anno
+```{r} 
+
+anno_AFP <- data.frame(row.names = rownames(clini_train),
+                       "AFP\n **" = clini_train$AFP
+)
+anno_MVI <- data.frame(row.names = rownames(clini_train),
+                       "MVI\n *" = clini_train$MVI
+)
+anno_Differentiation <- data.frame(row.names = rownames(clini_train),
+                                   "Differentiation\n **" = clini_train$Differentiation)
+anno_TNM <- data.frame(row.names = row.names(clini_train),
+                       TNM = clini_train$TNM.stage)
+anno_BCLC <- data.frame(row.names = rownames(clini_train),
+                        BCLC = clini_train$BCLC.stage)
+anno_AGE <- data.frame(row.names = rownames(clini_train),
+                       Age = clini_train$Age)
+anno_Gender <- data.frame(row.names = rownames(clini_train),
+                          Gender = clini_train$Gender)
+anno_capp <- data.frame(row.names = rownames(clini_train),
+                        "Tumor capsule" = clini_train$Tumor.capsule)
+anno_number <- data.frame(row.names = rownames(clini_train),
+                        "Tumor number" = clini_train$Tumor.number)
+anno_size <- data.frame(row.names = rownames(clini_train),
+                          "Tumor size" = clini_train$Tumor.size)
+anno_PVTT <- data.frame(row.names = rownames(clini_train),
+                        "PVTT"= clini_train$PVTT) 
+
+#---------------------------------------------------------
+p.AFP <- F.clinico.anno(sample.anno = anno_AFP,anno = "AFP",sample.order = train_set_order)+
+  scale_fill_manual(values = c("#424642","#c06014"))+
+  theme(axis.text.y = element_text(color = "red"))+
+  scale_y_discrete(labels=c("AFP ***"),position = "right")
+p.MVI <- F.clinico.anno(sample.anno = anno_MVI,anno = "MVI",sample.order = train_set_order)+
+  scale_fill_manual(values = c("#FDE8CD","#00917c"))+
+  theme(axis.text.y = element_text(color="red"))+
+  scale_y_discrete(labels=c("MVI *"),position = "right")
+p.TNM <- F.clinico.anno(sample.anno = anno_TNM,anno = "TNM",sample.order = train_set_order)+
+  scale_fill_manual(breaks=c("I","II","III","IV"),values = c("#E7D9EA","#16C79A","#11689E","#19456B"))
+
+p.BCLC <- F.clinico.anno(sample.anno = anno_BCLC,anno = "BCLC",sample.order = train_set_order)+
+  scale_fill_manual(values = c("#FFFF66","#FFCC00","#FF9900","#FF0000"))
+p.diff <- F.clinico.anno(sample.anno = anno_Differentiation,
+                        anno="Differentiation",sample.order = train_set_order)+
+  scale_fill_manual(breaks=c("high","medium","low","No"),values = c("#F2F4C3","#FC92E3","#005792","#480032"),
+                    labels= c("High","Medium","Low","No"))+
+  theme(axis.text.y =element_text(color="red"))+
+  scale_y_discrete(labels=c("Differentiation ***"),position = "right")
+p.TNM <- F.clinico.anno(sample.anno = anno_TNM,
+                        anno="TNM stage",sample.order = train_set_order)+
+  scale_fill_manual(values = c("#75D4F2","#52BDF2","#2D7DBC","#00416D"))
+p.BCLC <- F.clinico.anno(sample.anno = anno_BCLC,
+                        anno="BCLC",sample.order = train_set_order)+
+  scale_fill_manual(values = c("#E1E7EB","#AEB8C3","#947B89","#4E0E2E"))
+
+p.age<- F.clinico.anno(sample.anno = anno_AGE,
+                        anno="Age",sample.order = train_set_order)+
+  scale_fill_manual(breaks = c("<40","40~60",">60"),values = c("#D25565","#2E94B9","#F0B775"))
+p.gender<- F.clinico.anno(sample.anno = anno_Gender,
+                      anno="Gender",sample.order = train_set_order)+
+  scale_fill_manual(values = c("#FF82A9","#7F95D1"))
+p.capp<- F.clinico.anno(sample.anno = anno_capp,
+                         anno="Tumor capsule",sample.order = train_set_order)+
+  scale_fill_manual(values = c("#248888","#E7475E","#F0D879"),
+                    breaks = c("complete","Incomplete","No"),
+                    labels=c("Complete","Incomplete","No"))
+p.number <- F.clinico.anno(sample.anno = anno_number,
+                          anno="Tumor-number",sample.order = train_set_order)+
+  scale_fill_manual(values = c("#f9eed3","#9fb083"),labels=c("Mutilple","Solitary"))
+p.size <- F.clinico.anno(sample.anno = anno_size,
+                          anno="Tumor-size",sample.order = train_set_order)+
+  scale_fill_manual(values = c("#de4307","#f6d04d","#8bc24c"),
+                    breaks =c("<5","5~10",">10"))
+p.pvtt <- F.clinico.anno(sample.anno = anno_PVTT,
+                        anno="PVTT",sample.order = train_set_order)+
+  scale_fill_manual(values = c("#808180FF","#3B4992FF"))
+#---------------------------------------------------------
+p61.1 %>% 
+  #insert_top(p61.1,height = .02) %>%
+  insert_top(p.AFP,height = .02) %>%
+  insert_top(p.MVI,height = .02) %>%
+  insert_top(p.diff,height = .02) %>%
+  insert_top(p.TNM,height = .02) %>%
+  insert_top(p.BCLC,height = .02) %>%
+  insert_top(p.age,height = .02) %>%
+  insert_top(p.gender,height = .02) %>%
+  insert_top(p.capp,height = .02) %>%
+  insert_top(p.number,height = .02) %>%
+  insert_top(p.size,height = .02) %>%
+  insert_top(p.pvtt,height = .02)-> Figure1A_part2
+```
+### 6.1.3 Export Figure1A
+```{r}
+cairo_pdf(filename = "./3_output_figure/F1A_1_part1.pdf",width = 7,height = 7)
+print(Figure1A_part1)
+dev.off()
+cairo_pdf(filename = "./3_output_figure/F1A_1_part2.pdf",width = 7,height = 15)
+print(Figure1A_part2)
+dev.off()
+```
+## 6.2 Figure1B
+### 6.2.1 Figure1B_OS
+```{r}
+## OS
+legend_label <- data.frame(table(sur_data_108$train_set_761)) %$% 
+  paste0(Var1,": ","n=",Freq)
+fit <- survfit(Surv(OS.time,OS)~train_set_761,sur_data_108)
+cairo_pdf(filename = "./3_output_figure/F1B_OS_km_curve.pdf",width = 6,height = 5)
+F.plot_surival(fit_object = fit,
+             surivaldata = sur_data_108, 
+             ytitle = OS, legend_text =  legend_label,palettes = c("forestgreen","midnightblue","red4")
+)
+dev.off()
+
+
+## HR
+SIIvsSI = coxph(Surv(OS.time,OS)~train_set_761,sur_data_108[sur_data_108$train_set_761!="SIII",]) %>% summary()
+SIIIvsSI = coxph(Surv(OS.time,OS)~train_set_761,sur_data_108[sur_data_108$train_set_761!="SII",]) %>% summary()
+SIIIvsSII = coxph(Surv(OS.time,OS)~train_set_761,sur_data_108[sur_data_108$train_set_761!="SI",]) %>% summary()
+
+cairo_pdf(filename = "./3_output_figure/F1B_OS_HR_table.pdf",width = 6,height = 5)
+data.frame(#subtypes = c("SI","SII","SIII"),
+           SI = c("",SIIvsSI$logtest[3]%>% round(.,4),SIIIvsSI$logtest[3]%>% round(.,4)),
+           SII = c(F.pasteHR(SIIvsSI$conf.int),"",SIIIvsSII$logtest[3]%>% round(.,4)),
+           SIII = c(F.pasteHR(SIIIvsSI$conf.int),F.pasteHR(SIIIvsSII$conf.int),"")
+           ) %>% 
+ggtexttable(rows = c("SI","SII","SIII"),cols=c("SI","SII","SIII"),
+            theme = ttheme(colnames.style=colnames_style(color = "black",face = "bold",size = 12,fill = "grey80",linewidth = 1,
+  linecolor = "white"),rownames.style=rownames_style(  color = "black",
+  face = "bold",
+  size = 12,
+  fill = "grey80",
+  linewidth = 1,
+  linecolor = "white"))) %>%
+ table_cell_bg(row = c(3),column = c(2),fill= ggplot2::alpha("#79AF97FF",0.6)) %>%
+      table_cell_bg(row = c(4),column = c(2),fill=ggplot2::alpha("#79AF97FF",0.6)) %>%
+      table_cell_bg(row = c(4),column = c(3),fill=ggplot2::alpha("#79AF97FF",0.6))  %>%
+      table_cell_bg(row = c(2),column = c(3),fill=ggplot2::alpha("#B24745FF",0.6)) %>%
+      table_cell_bg(row = c(2),column = c(4),fill=ggplot2::alpha("#B24745FF",0.6)) %>%
+      table_cell_bg(row = c(3),column = c(4),fill=ggplot2::alpha("#B24745FF",0.6))
+dev.off()
+```
+### 6.2.2 Figure2B_RFS
+```{r}
+## RFS
+legend_label <- data.frame(table(sur_data_108$train_set_761)) %$% 
+  paste0(Var1,": ","n=",Freq)
+fit <- survfit(Surv(RFS.time,RFS)~train_set_761,sur_data_108)
+cairo_pdf(filename = "./3_output_figure/F1B_RFS_km_curve.pdf",width = 6,height = 5)
+F.plot_surival(fit_object = fit,
+             surivaldata = sur_data_108, 
+             ytitle = RFS, legend_text =  legend_label,palettes = c("forestgreen","midnightblue","red4")
+)
+dev.off()
+
+
+## HR
+SIIvsSI = coxph(Surv(RFS.time,RFS)~train_set_761,sur_data_108[sur_data_108$train_set_761!="SIII",]) %>% summary()
+SIIIvsSI = coxph(Surv(RFS.time,RFS)~train_set_761,sur_data_108[sur_data_108$train_set_761!="SII",]) %>% summary()
+SIIIvsSII = coxph(Surv(RFS.time,RFS)~train_set_761,sur_data_108[sur_data_108$train_set_761!="SI",]) %>% summary()
+
+cairo_pdf(filename = "./3_output_figure/F1B_RFS_HR_table.pdf",width = 6,height = 5)
+data.frame(#subtypes = c("SI","SII","SIII"),
+           SI = c("",SIIvsSI$logtest[3]%>% round(.,4),SIIIvsSI$logtest[3]%>% round(.,4)),
+           SII = c(F.pasteHR(SIIvsSI$conf.int),"",SIIIvsSII$logtest[3]%>% round(.,4)),
+           SIII = c(F.pasteHR(SIIIvsSI$conf.int),F.pasteHR(SIIIvsSII$conf.int),"")
+           ) %>% 
+ggtexttable(rows = c("SI","SII","SIII"),cols=c("SI","SII","SIII"),
+            theme = ttheme(colnames.style=colnames_style(color = "black",face = "bold",size = 12,fill = "grey80",linewidth = 1,
+  linecolor = "white"),rownames.style=rownames_style(  color = "black",
+  face = "bold",
+  size = 12,
+  fill = "grey80",
+  linewidth = 1,
+  linecolor = "white"))) %>%
+ table_cell_bg(row = c(3),column = c(2),fill= ggplot2::alpha("#79AF97FF",0.6)) %>%
+      table_cell_bg(row = c(4),column = c(2),fill=ggplot2::alpha("#79AF97FF",0.6)) %>%
+      table_cell_bg(row = c(4),column = c(3),fill=ggplot2::alpha("#79AF97FF",0.6))  %>%
+      table_cell_bg(row = c(2),column = c(3),fill=ggplot2::alpha("#B24745FF",0.6)) %>%
+      table_cell_bg(row = c(2),column = c(4),fill=ggplot2::alpha("#B24745FF",0.6)) %>%
+      table_cell_bg(row = c(3),column = c(4),fill=ggplot2::alpha("#B24745FF",0.6))
+dev.off()
+```
+## 6.3 Figure1C
+### 6.2.1 Figure1B_OS
+```{r}
+## OS
+legend_label <- data.frame(table(sur_data_44$valid_set_761)) %$% 
+  paste0(Var1,": ","n=",Freq)
+fit <- survfit(Surv(OS.time,OS)~valid_set_761,sur_data_44)
+cairo_pdf(filename = "./3_output_figure/F1C_OS_km_curve.pdf",width = 6,height = 5)
+F.plot_surival(fit_object = fit,
+             surivaldata = sur_data_44, 
+             ytitle = OS, legend_text =  legend_label,palettes = c("forestgreen","midnightblue","red4")
+)
+dev.off()
+
+
+## HR
+SIIvsSI = coxph(Surv(OS.time,OS)~valid_set_761,sur_data_44[sur_data_44$valid_set_761!="SIII",]) %>% summary()
+SIIIvsSI = coxph(Surv(OS.time,OS)~valid_set_761,sur_data_44[sur_data_44$valid_set_761!="SII",]) %>% summary()
+SIIIvsSII = coxph(Surv(OS.time,OS)~valid_set_761,sur_data_44[sur_data_44$valid_set_761!="SI",]) %>% summary()
+
+cairo_pdf(filename = "./3_output_figure/F1C_OS_HR_table.pdf",width = 6,height = 5)
+data.frame(#subtypes = c("SI","SII","SIII"),
+           SI = c("",SIIvsSI$logtest[3]%>% round(.,4),SIIIvsSI$logtest[3]%>% round(.,4)),
+           SII = c(F.pasteHR(SIIvsSI$conf.int),"",SIIIvsSII$logtest[3]%>% round(.,4)),
+           SIII = c(F.pasteHR(SIIIvsSI$conf.int),F.pasteHR(SIIIvsSII$conf.int),"")
+           ) %>% 
+ggtexttable(rows = c("SI","SII","SIII"),cols=c("SI","SII","SIII"),
+            theme = ttheme(colnames.style=colnames_style(color = "black",face = "bold",size = 12,fill = "grey80",linewidth = 1,
+  linecolor = "white"),rownames.style=rownames_style(  color = "black",
+  face = "bold",
+  size = 12,
+  fill = "grey80",
+  linewidth = 1,
+  linecolor = "white"))) %>%
+ table_cell_bg(row = c(3),column = c(2),fill= ggplot2::alpha("#79AF97FF",0.6)) %>%
+      table_cell_bg(row = c(4),column = c(2),fill=ggplot2::alpha("#79AF97FF",0.6)) %>%
+      table_cell_bg(row = c(4),column = c(3),fill=ggplot2::alpha("#79AF97FF",0.6))  %>%
+      table_cell_bg(row = c(2),column = c(3),fill=ggplot2::alpha("#B24745FF",0.6)) %>%
+      table_cell_bg(row = c(2),column = c(4),fill=ggplot2::alpha("#B24745FF",0.6)) %>%
+      table_cell_bg(row = c(3),column = c(4),fill=ggplot2::alpha("#B24745FF",0.6))
+dev.off()
+```
+### 6.2.2 Figure2B_RFS
+```{r}
+# combine SI and SII
+sur_data_44$valid_set_761_c12 <- sur_data_44$valid_set_761 %>% gsub("^SI$","SI&SII",.) %>% gsub("^SII$","SI&SII",.)
+## RFS
+legend_label <- data.frame(table(sur_data_44$valid_set_761_c12)) %$% 
+  paste0(Var1,": ","n=",Freq)
+fit <- survfit(Surv(RFS.time,RFS)~valid_set_761_c12,sur_data_44)
+cairo_pdf(filename = "./3_output_figure/F1C_RFS_km_curve.pdf",width = 6,height = 5)
+F.plot_surival(fit_object = fit,
+             surivaldata = sur_data_44, 
+             ytitle = RFS, legend_text =  legend_label,palettes = c("forestgreen","midnightblue","red4")
+)
+dev.off()
+
+
+## HR
+SIIIvsSISII = coxph(Surv(RFS.time,RFS)~valid_set_761_c12,sur_data_44) %>% summary()
+
+```
+# 7.  Pathway alterations of 3 HCC proteomic subtypes in Liu et al.'s cohort
+## 7.1 ssgsea enrichment in 152 samples
+```{r}
+##id_trans
+gene_4032 <- bitr(geneID = row.names(tn_exp),fromType = "UNIPROT",toType = "ENTREZID",OrgDb = "org.Hs.eg.db")
+gene_4032 <- gene_4032[!duplicated(gene_4032$ENTREZID),]
+gsea.data_4032 <- tumor_exp[gene_4032$UNIPROT,]
+rownames(gsea.data_4032) <- gene_4032$ENTREZID
+## enrichment
+ssgsea_result <- gsva(as.matrix(gsea.data_4032),gset.idx.list = kegg_list,method="gsva",mx.diff=FALSE,
+                  kcdf="Gaussian") %>% as.data.frame()
+```
+## 7.2 difference analysis
+```{r}
+SI = which(colnames(ssgsea_result) %in% rownames(sur_data_152)[sur_data_152$sub761=="SI"])
+SII = which(colnames(ssgsea_result) %in% rownames(sur_data_152)[sur_data_152$sub761=="SII"])
+SIII = which(colnames(ssgsea_result) %in% rownames(sur_data_152)[sur_data_152$sub761=="SIII"])
+
+ssgsea_kegg.diff <- apply(ssgsea_result,1,function(k){
+  data.frame(SIIvsSI.fc = (mean(k[SII]) - mean(k[SI])),
+             SIIvsSI.p = wilcox.test(k[SII],k[SI])[[3]],
+            SIIIvsSI.fc =(mean(k[SIII]) - mean(k[SI])),
+             SIIIvsSI.p = wilcox.test(k[SIII] ,k[SI])[[3]],
+          SIIIvsSII.fc = (mean(k[SIII]) - mean(k[SII])),
+             SIIIvsSII.p = wilcox.test(k[SIII] , k[SII])[[3]])
+}) %>% do.call(rbind,.)
+
+```
+## 7.3 cluster
+```{r}
+ssgsea_kegg.scale <- t(ssgsea_result) %>% scale() %>% t() %>% as.data.frame()
+
+SI_up.k <- ssgsea_kegg.diff %>% filter(SIIvsSI.fc<0&SIIIvsSI.fc<0&SIIvsSI.p<0.01&SIIIvsSI.p<0.01)
+SIII_up.k <- ssgsea_kegg.diff %>% filter(SIIIvsSII.fc>0&SIIIvsSI.fc>0&SIIIvsSI.p<0.01&SIIIvsSII.p<0.01)
+all_diff.k <- ssgsea_kegg.diff %>% filter(SIIIvsSII.p<0.01|SIIIvsSI.p<0.01|SIIvsSI.p<0.01)
+
+other.k <- setdiff(rownames(all_diff.k),c(rownames(SI_up.k),rownames(SIII_up.k))) 
+## cut other.k to  two class
+cut.result <- dist(ssgsea_kegg.scale[other.k,]) %>% hclust() %>% cutree(k=2)
+other.1 <- names(cut.result[cut.result==1])
+other.2 <- names(cut.result[cut.result==2])
+other.1.order <- dist(ssgsea_kegg.scale[other.1,]) %>% hclust() %>% use_series(order) %>% other.1[.]
+other.2.order <- dist(ssgsea_kegg.scale[other.2,]) %>% hclust() %>% use_series(order) %>% other.2[.]
+
+SI_up.order <- dist(ssgsea_kegg.scale [rownames(SI_up.k),]) %>% hclust() %>% use_series(order) %>% rownames(SI_up.k)[.]
+SIII_up.order <- dist(ssgsea_kegg.scale[rownames(SIII_up.k),]) %>% hclust() %>% use_series(order) %>% rownames(SIII_up.k)[.]
+##
+
+
+kegg_cluster <- data.frame(row.names = c(SI_up.order,SIII_up.order,other.1,other.2),
+                           kegg = c(SI_up.order,SIII_up.order,other.1,other.2),
+                           cluster=c(rep("k1",44),rep("k4",47),rep("k2",20),rep("k3",33)))
+```
+# 8. Figure1D
+```{r}
+
+p8.1 <- F.heatmap(data = ssgsea_kegg.scale[SI_up.order,],gene.order = SI_up.order,sample.order = colnames(ssgsea_kegg.scale)[c(SI,SII,SIII)],fillname = "Enrichment score")
+p8.1.tree <- F.tree(dist(ssgsea_kegg.scale[SI_up.order,]) %>% hclust())
+
+
+p8.2 <- F.heatmap(data = ssgsea_kegg.scale[other.1.order,],gene.order = other.1.order,sample.order = colnames(ssgsea_kegg.scale)[c(SI,SII,SIII)],fillname = "Enrichment score")
+p8.2.tree <- F.tree(dist(ssgsea_kegg.scale[other.1.order,]) %>% hclust())
+
+p8.3 <- F.heatmap(data = ssgsea_kegg.scale[other.2.order,],gene.order = other.2.order,sample.order = colnames(ssgsea_kegg.scale)[c(SI,SII,SIII)],fillname = "Enrichment score")
+p8.3.tree <- F.tree(dist(ssgsea_kegg.scale[other.2.order,]) %>% hclust())
+
+p8.4 <- F.heatmap(data = ssgsea_kegg.scale[SIII_up.order,],gene.order = SIII_up.order,sample.order = colnames(ssgsea_kegg.scale)[c(SI,SII,SIII)],fillname = "Enrichment score")
+p8.4.tree <- F.tree(dist(ssgsea_kegg.scale[SIII_up.order,]) %>% hclust())
+
+##anno 
+p8.anno <- data.frame(sample=rownames(sur_data_152),
+                       sub=sur_data_152$sub761)
+ggplot(p8.anno,aes(x=factor(sample,levels = colnames(ssgsea_kegg.scale)[c(SI,SII,SIII)]),y="",fill=sub))+
+  geom_tile()+
+  theme_void()+
+  scale_fill_manual(values = c("forestgreen","midnightblue","red4"))->p8.5
+
+p8.1 %>% insert_top(p8.5,height = 0.08) %>%
+  insert_bottom(p8.2,height = 0.5) %>%
+  insert_bottom(p8.3,height = 0.8) %>%
+  insert_bottom(p8.4,height = 1)
+
+## save plot
+cairo_pdf(filename = "./3_output_figure/F1D_part_1.pdf",width = 7,height = 3)
+p8.1 %>% insert_left(p8.1.tree,width = 0.05)
+dev.off()
+
+cairo_pdf(filename = "./3_output_figure/F1D_part_2.pdf",width = 7,height = 1.5)
+p8.2 %>% insert_left(p8.2.tree,width = 0.05)
+dev.off()
+
+cairo_pdf(filename = "./3_output_figure/F1D_part_3.pdf",width = 7,height = 2)
+p8.3%>% insert_left(p8.3.tree,width = 0.05)
+dev.off()
+
+cairo_pdf(filename = "./3_output_figure/F1D_part_4.pdf",width = 7,height = 3)
+p8.4%>% insert_left(p8.4.tree,width = 0.05)
+dev.off()
+
+cairo_pdf(filename = "./3_output_figure/F1D_part_5.pdf",width = 7,height = 0.5)
+print(p8.5)
+dev.off()
+```
+# 9. Figure1E
+```{r}
+kegg_class$cluster <- kegg_cluster[kegg_class$KEGG,"cluster"]
+kegg_class_stastic <- data.frame(Var = table(kegg_class$group) %>% names()) 
+
+
+sankey.data <- test <- data.frame(response = c("Other","Proliferation","Metabolism","Immune","Metastases",
+                                               "Other","Proliferation","Metabolism","Immune","Metastases",
+                                "Other","Proliferation","Metabolism","Immune","Metastases",
+                                "Other","Proliferation","Metabolism","Immune","Metastases"),
+                   freq = c(4.5,0,95.5,0,0,
+                            15,15,70,0,0,
+                            24.2,27.3,9.1,33.3,6.1,
+                            23.4,25.5,4.3,27.7,19.1),
+                   subject = c(1:5,1:5,1:5,1:5),
+                   survey=c(rep("k1",5),rep("k2",5),rep("k3",5),rep("k4",5))
+                   )
+
+sankey.data$survey <- factor(test$survey,levels = c("k1","k2","k3","k4"))
+sankey.data$response <- factor(test$response,levels = c("Metabolism","Proliferation","Immune","Metastases","Other"))
+ggplot(sankey.data,
+       aes(x = survey, stratum = response, alluvium = subject,
+           y = freq,
+           fill = response, label = response)) +
+  geom_flow(size=2,alpha=1) +
+ geom_stratum(alpha = 1,linetype=5) +
+  #geom_text(stat = "stratum", size = 3,family="AB") +
+
+  theme_bw()+
+  scale_x_discrete(expand = c(0.05,0))+
+  scale_y_continuous(expand = c(0,0))+
+  theme(
+        axis.text = element_text(color = "black",family = "TNR",size = 10),
+        #axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title = element_text(color = "black",family = "TNR",size = 13)
+        )+
+  theme(legend.position = "right")+
+  #geom_segment(x=3.16,y=0,yend=100,xend=3.16,hjust=0.5)+
+  #geom_segment(x=c("k3"),y=0,yend=100,xend="k3")+
+  labs(x="",y="Percent of KEGG (%)")+
+  scale_fill_manual(breaks = c("Metabolism","Proliferation","Immune","Metastases","Other"),values = c("#2e8b57","#E99B12","tomato3","salmon4","grey80"))+
+  #geom_text(x="k1",y=85,label=c("Metabolism"),hjust=0.03,family="AB",size=6.5)+
+  #geom_text(x="k3",y=52,label=c("Proliferation"),hjust=0.15,family="AB",size=5)+
+  #geom_text(x="k3",y=81,label=c("Immune"),hjust=0.17,family="AB",size=6)+
+  #geom_text(x="k4",y=31,label=c("Metastases"),hjust=0.9,family="AB",size=4)+
+  #geom_text(x="k3",y=15,label=c("Other"),hjust=1,family="AB",size=5)+
+  theme(plot.margin = unit(c(1,1,0,0),"line"),
+        panel.grid = element_blank()) ->Figure1E
+
+cairo_pdf(filename = "./3_output_figure/F1_E.pdf",width = 7,height = 5)
+print(Figure1E)
+dev.off()
+```
+# save
+```{r}
+save(list = ls(),file = "./2_output_data/HCC proteomic subtypes related code.Rdata")
+```
