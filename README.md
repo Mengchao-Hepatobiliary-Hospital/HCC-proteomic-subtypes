@@ -6,13 +6,14 @@ supplementary code for the paper:
 
 # Data analysis and statistics in R
 
--   HCC proteomic subtypes related
+-   Identify three HCC proteomic subtypes
 
     -   Consensus Clustering for HCC in Liu et al.'s Proteomic Data
 
     -   Pathway alterations of 3 HCC proteomic subtypes in Liu et al.'s cohort
 
-    -   Cross-validation of HCC proteomic subtypes from Mutil-center
+-   Constitute 9-proteins' HCC proteomic subtypes identifing model
 
-    -   Simplified panel for discriminating proteomic subtypes
-
+    - Feature selection
+    
+    - Model training and validtion
