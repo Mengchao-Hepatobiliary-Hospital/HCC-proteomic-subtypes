@@ -1,0 +1,20 @@
+---
+title: "Constitute 9-proteins' HCC proteomic subtypes identifing model"
+author:
+  - En Hu
+keywords:
+  - subtype
+  - HCC 
+  - model
+documentclass: ctexart
+geometry: margin=0.6cm
+output:
+  rticles::ctex:
+    fig_caption: yes
+    number_sections: yes
+    toc: yes
+header-includes:
+ - \usepackage{fvextra}
+ - \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+ - \CTEXsetup[format={\huge\bfseries\raggedright}]{section}
+---
