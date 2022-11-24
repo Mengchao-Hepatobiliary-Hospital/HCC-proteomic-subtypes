@@ -20,46 +20,59 @@ header-includes:
 ---
 
 # Environment
+
 ```{r}
-knitr::opts_chunk$set(warning = FALSE)
 options(stringsAsFactors = F)
 Sys.setlocale(locale = "English")
 pacman::p_load(magrittr, dplyr,ggpubr,aplot,clusterProfiler,GSVA,factoextra,ggalluvial,ConsensusClusterPlus,survival,survminer)
 source("Function/Function.R")
 ```
+
 # 1. Input data
+
 ## 1.1 Training set
+
 ```{r}
 load("1_raw_data/1.Proteomic data/sur_data_44.Rdata")
 load("1_raw_data/1.Proteomic data/train set clinicopathoglogic.Rdata")
 ```
+
 ## 1.2 Validtion set
+
 ```{r}
 load("1_raw_data/1.Proteomic data/sur_data_108.Rdata")
 ```
+
 ## 1.3 All samples
+
 ```{r}
 load("1_raw_data/1.Proteomic data/sur_data_152.Rdata")
 load("1_raw_data/1.Proteomic data/152 samples and 4032 proteins .Rdata")
 load("1_raw_data//1.Proteomic data/152 samples and all proteins.Rdata")
 ```
+
 ## 1.4 Kegg database downloaded from GSEA Official website
+
 ```{r}
 gmt_kegg <- readLines("./1_raw_data/1.Proteomic data/c2.cp.kegg.v7.4.entrez.gmt")
 kegg_list <- F.gmt_fix(gmt_kegg)
 ```
+
 ## 1.5 Kegg feature classification
+
 ```{r}
 kegg_class <- read.csv("./1_raw_data/1.Proteomic data/kegg_class.csv")
 ```
 
-# 2. HCC proteomic subtypes in train set(108 samples)\
+# 2. HCC proteomic subtypes in train set(108 samples) 
 
 ## 2.1 Split data set
+
 ```{r}
 train_set <- tumor_exp[rownames(sur_data_108)]
 valid_set <- tumor_exp[rownames(sur_data_44)]
 ```
+
 ## 2.2 Fearure section
 
 ```{r}
@@ -96,6 +109,7 @@ sur_data_108$train_set_1128 <- sur_data_108$train_set_1128 %>%
   gsub("2","SIII",.) %>%
   gsub("4", "SIII",.)
 ```
+
 ## 2.4 Subtype-specfic proteins
 
 ```{r}
@@ -119,7 +133,9 @@ sub_spec <- filter(subtype_dep,(SIIvsSI.p<0.01&(SIIvsSI.FC >2 |SIIvsSI.FC <0.5))
 
 sub_specfics <- intersect(rownames(sub_spec),proteins_80)
 ```
+
 ## 2.5 Subtypes identified by sub_specfic proteins(761)
+
 ```{r}
 train_result2 <- ConsensusClusterPlus(as.matrix(train_set[sub_specfics,]), maxK = 8,
                                                            reps = 1000, pItem = 0.8,
@@ -141,13 +157,17 @@ sur_data_108$train_set_761 <- sur_data_108$train_set_761 %>%
   gsub("2","SIII",.) %>%
   gsub("4", "SIII",.)
 ```
+
 Subtype1(1128 proteins) and Subtype2(761) are 100% similar in train set
+
 ```{r}
 table(sur_data_108$train_set_1128, sur_data_108$train_set_761)
 ```
 
 # 4. Subtypes used 1128 or 761 proetin in valid_set
+
 ## 4.1 1128 proetins
+
 ```{r}
 valid_result <- ConsensusClusterPlus(as.matrix(valid_set[feature,]), maxK = 8,
                                                            reps = 1000, pItem = 0.8,
@@ -170,7 +190,9 @@ sur_data_44$valid_set_1128 <- sur_data_44$valid_set_1128 %>%
   gsub("4", "SIII",.)
 
 ```
+
 ## 4.2 761 proteins
+
 ```{r}
 valid_result2 <- ConsensusClusterPlus(as.matrix(valid_set[sub_specfics,]), maxK = 8,
                                                            reps = 1000, pItem = 0.8,
@@ -191,19 +213,26 @@ sur_data_44$valid_set_761 <- sur_data_44$valid_set_761 %>%
   gsub("3","SIII",.) %>%
   gsub("4", "SIII",.)
 ```
+
 Subtype1(1128 proteins) and Subtype2(761) are 90.9% similar in valid set
+
 ```{r}
 table(sur_data_44$train_set_1128, sur_data_44$train_set_761)
 ```
-# 5. 152 samples’ subtype
+
+# 5. 152 samples' subtype
+
 ```{r}
 sur_data_152$sub761 <- c(sur_data_108[rownames(sur_data_108),"train_set_761"] %>% na.omit(),
                          sur_data_44[rownames(sur_data_44),"valid_set_761"] %>% na.omit())
 ```
 
 # 6. Figure1A & Figure1B
+
 ## 6.1 Figure1A
+
 ### 6.1.1 Heatmap
+
 ```{r}
 p61.anno <- data.frame(sample=rownames(sur_data_108),
                        sub=sur_data_108$train_set_761)
@@ -246,8 +275,10 @@ ggplot(p61.2.plot.data,aes(x=sample,y=gene,fill=value))+
 
 p61.2 %>% insert_top(p61.1,height = 0.05) -> Figure1A_part1
 ```
+
 ### 6.1.2 Clinicopathoglogic anno
-```{r} 
+
+```{r}
 
 anno_AFP <- data.frame(row.names = rownames(clini_train),
                        "AFP\n **" = clini_train$AFP
@@ -337,7 +368,9 @@ p61.1 %>%
   insert_top(p.size,height = .02) %>%
   insert_top(p.pvtt,height = .02)-> Figure1A_part2
 ```
+
 ### 6.1.3 Export Figure1A
+
 ```{r}
 cairo_pdf(filename = "./3_output_figure/F1A_1_part1.pdf",width = 7,height = 7)
 print(Figure1A_part1)
@@ -346,8 +379,11 @@ cairo_pdf(filename = "./3_output_figure/F1A_1_part2.pdf",width = 7,height = 15)
 print(Figure1A_part2)
 dev.off()
 ```
+
 ## 6.2 Figure1B
+
 ### 6.2.1 Figure1B_OS
+
 ```{r}
 ## OS
 legend_label <- data.frame(table(sur_data_108$train_set_761)) %$% 
@@ -388,7 +424,9 @@ ggtexttable(rows = c("SI","SII","SIII"),cols=c("SI","SII","SIII"),
       table_cell_bg(row = c(3),column = c(4),fill=ggplot2::alpha("#B24745FF",0.6))
 dev.off()
 ```
+
 ### 6.2.2 Figure2B_RFS
+
 ```{r}
 ## RFS
 legend_label <- data.frame(table(sur_data_108$train_set_761)) %$% 
@@ -429,8 +467,11 @@ ggtexttable(rows = c("SI","SII","SIII"),cols=c("SI","SII","SIII"),
       table_cell_bg(row = c(3),column = c(4),fill=ggplot2::alpha("#B24745FF",0.6))
 dev.off()
 ```
+
 ## 6.3 Figure1C
+
 ### 6.2.1 Figure1B_OS
+
 ```{r}
 ## OS
 legend_label <- data.frame(table(sur_data_44$valid_set_761)) %$% 
@@ -471,7 +512,9 @@ ggtexttable(rows = c("SI","SII","SIII"),cols=c("SI","SII","SIII"),
       table_cell_bg(row = c(3),column = c(4),fill=ggplot2::alpha("#B24745FF",0.6))
 dev.off()
 ```
+
 ### 6.2.2 Figure2B_RFS
+
 ```{r}
 # combine SI and SII
 sur_data_44$valid_set_761_c12 <- sur_data_44$valid_set_761 %>% gsub("^SI$","SI&SII",.) %>% gsub("^SII$","SI&SII",.)
@@ -491,8 +534,11 @@ dev.off()
 SIIIvsSISII = coxph(Surv(RFS.time,RFS)~valid_set_761_c12,sur_data_44) %>% summary()
 
 ```
-# 7.  Pathway alterations of 3 HCC proteomic subtypes in Liu et al.'s cohort
+
+# 7. Pathway alterations of 3 HCC proteomic subtypes in Liu et al.'s cohort
+
 ## 7.1 ssgsea enrichment in 152 samples
+
 ```{r}
 ##id_trans
 gene_4032 <- bitr(geneID = row.names(tn_exp),fromType = "UNIPROT",toType = "ENTREZID",OrgDb = "org.Hs.eg.db")
@@ -503,7 +549,9 @@ rownames(gsea.data_4032) <- gene_4032$ENTREZID
 ssgsea_result <- gsva(as.matrix(gsea.data_4032),gset.idx.list = kegg_list,method="gsva",mx.diff=FALSE,
                   kcdf="Gaussian") %>% as.data.frame()
 ```
+
 ## 7.2 difference analysis
+
 ```{r}
 SI = which(colnames(ssgsea_result) %in% rownames(sur_data_152)[sur_data_152$sub761=="SI"])
 SII = which(colnames(ssgsea_result) %in% rownames(sur_data_152)[sur_data_152$sub761=="SII"])
@@ -519,7 +567,9 @@ ssgsea_kegg.diff <- apply(ssgsea_result,1,function(k){
 }) %>% do.call(rbind,.)
 
 ```
+
 ## 7.3 cluster
+
 ```{r}
 ssgsea_kegg.scale <- t(ssgsea_result) %>% scale() %>% t() %>% as.data.frame()
 
@@ -544,7 +594,9 @@ kegg_cluster <- data.frame(row.names = c(SI_up.order,SIII_up.order,other.1,other
                            kegg = c(SI_up.order,SIII_up.order,other.1,other.2),
                            cluster=c(rep("k1",44),rep("k4",47),rep("k2",20),rep("k3",33)))
 ```
+
 # 8. Figure1D
+
 ```{r}
 
 p8.1 <- F.heatmap(data = ssgsea_kegg.scale[SI_up.order,],gene.order = SI_up.order,sample.order = colnames(ssgsea_kegg.scale)[c(SI,SII,SIII)],fillname = "Enrichment score")
@@ -594,7 +646,9 @@ cairo_pdf(filename = "./3_output_figure/F1D_part_5.pdf",width = 7,height = 0.5)
 print(p8.5)
 dev.off()
 ```
+
 # 9. Figure1E
+
 ```{r}
 kegg_class$cluster <- kegg_cluster[kegg_class$KEGG,"cluster"]
 kegg_class_stastic <- data.frame(Var = table(kegg_class$group) %>% names()) 
@@ -648,7 +702,9 @@ cairo_pdf(filename = "./3_output_figure/F1_E.pdf",width = 7,height = 5)
 print(Figure1E)
 dev.off()
 ```
+
 # save
+
 ```{r}
 save(list = ls(),file = "./2_output_data/HCC proteomic subtypes related code.Rdata")
 ```
