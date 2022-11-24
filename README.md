@@ -4,7 +4,7 @@ supplementary code for the paper:
 
 **Integrated multi-omics analysis revealing the universality of proteomic subtypes for Hepatocellular carcinoma precision therapy**
 
-# Development Enviroment
+# Development enviroment
 
 -   Rstudio 1.4.1106
 
