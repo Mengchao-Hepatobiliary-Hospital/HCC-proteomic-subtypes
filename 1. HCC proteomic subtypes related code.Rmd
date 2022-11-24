@@ -28,6 +28,7 @@ options(stringsAsFactors = F)
 Sys.setlocale(locale = "English")
 pacman::p_load(magrittr, dplyr,ggpubr,aplot,clusterProfiler,GSVA,factoextra,ggalluvial,ConsensusClusterPlus,survival,survminer)
 source("Function/Function.R")
+# load("./2_output_data/HCC proteomic subtypes related code.Rdata")
 ```
 
 # 1. Input data
@@ -708,5 +709,7 @@ dev.off()
 # save
 
 ```{r}
-save(list = ls(),file = "./2_output_data/HCC proteomic subtypes related code.Rdata")
+# save(list = ls(),file = "./2_output_data/HCC proteomic subtypes related code.Rdata")
+# save(sur_data_152, file = "./2_output_data/sur_data_152.data")
+# load("./2_output_data/HCC proteomic subtypes related code.Rdata")
 ```
