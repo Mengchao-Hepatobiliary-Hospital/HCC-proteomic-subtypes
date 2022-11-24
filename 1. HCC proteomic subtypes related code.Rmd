@@ -579,8 +579,8 @@ ssgsea_kegg.scale <- t(ssgsea_result) %>% scale() %>% t() %>% as.data.frame()
 SI_up.k <- ssgsea_kegg.diff %>% filter(SIIvsSI.fc<0&SIIIvsSI.fc<0&SIIvsSI.p<0.01&SIIIvsSI.p<0.01)
 SIII_up.k <- ssgsea_kegg.diff %>% filter(SIIIvsSII.fc>0&SIIIvsSI.fc>0&SIIIvsSI.p<0.01&SIIIvsSII.p<0.01)
 all_diff.k <- ssgsea_kegg.diff %>% filter(SIIIvsSII.p<0.01|SIIIvsSI.p<0.01|SIIvsSI.p<0.01)
-
 other.k <- setdiff(rownames(all_diff.k),c(rownames(SI_up.k),rownames(SIII_up.k))) 
+
 ## cut other.k to  two class
 cut.result <- dist(ssgsea_kegg.scale[other.k,]) %>% hclust() %>% cutree(k=2)
 other.1 <- names(cut.result[cut.result==1])
@@ -711,5 +711,5 @@ dev.off()
 ```{r}
 # save(list = ls(),file = "./2_output_data/HCC proteomic subtypes related code.Rdata")
 # save(sur_data_152, file = "./2_output_data/sur_data_152.data")
-# load("./2_output_data/HCC proteomic subtypes related code.Rdata")
+#load("./2_output_data/HCC proteomic subtypes related code.Rdata")
 ```
