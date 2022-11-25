@@ -183,3 +183,18 @@ F.gmt_fix <- function(gmt){
   return(database_list_gsva)
 }
 #-----------------------------------------------
+Plot_pca <- function(pca_data,group){fviz_pca_ind(pca_data,
+             geom= "point",
+             col.ind = group,
+             #alette = c("dodgerblue3","firebrick1"),
+             addEllipses = T,
+             #ellipse.type="confidence",
+             legend.title="Cohort",
+             ellipse.level=0.9,
+             repel = TRUE,
+             #select.ind = list(cos2 = 158),
+             ggtheme=theme_bw()
+             
+             
+)
+}

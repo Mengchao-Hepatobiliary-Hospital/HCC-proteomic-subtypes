@@ -1,6 +1,6 @@
 # Background
 
-supplementary code for the paper:
+Here, we provide major supplementary code used in following paper. The code involves method of "HCC proteomic subtype identification", "Simplified panel for discriminating proteomic subtypes", and "Drug sensitivity prediction model". For more details, please refer to the method section in the paper.
 
 **Integrated multi-omics analysis revealing the universality of proteomic subtypes for Hepatocellular carcinoma precision therapy**
 
