@@ -1,5 +1,7 @@
 ---
 title: "Constitute 9-proteins' HCC proteomic subtypes identifing model"
+institute:
+  - Mengchao Hepatobiliry Hospital
 author:
   - En Hu
 keywords:
@@ -18,4 +20,84 @@ header-includes:
  - \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
  - \CTEXsetup[format={\huge\bfseries\raggedright}]{section}
 ---
-test
+
+# Environment
+
+```{r}
+rm(list = ls())
+options(stringsAsFactors = F)
+Sys.setlocale(locale = "English")
+pacman::p_load(magrittr,tidyr,stringr,dplyr,DMwR2,DreamAI,factoextra,FactoMineR,ggalluvial,ggforce)
+source("Function/Function.R")
+```
+- Here, three cohorts' proteomic data was used to constitute  subtype identifing model.(Jiang et als.' data, Gao et als.' data and This study's data).
+
+- Only tumor sample's expression data was used in model building.
+
+# 1. Input data
+
+## 1.1 Jiang et als.' data
+```{r}
+load("./1_raw_data/2. Jiang data/jiang_raw_expression.Rdata")
+load("./1_raw_data/2. Jiang data/jiang_sur_data.Rdata")
+```
+## 1.2 Gao et als.' data
+```{r}
+load("./1_raw_data/3. Gao data/gao_raw_expression.Rdata")
+load("./1_raw_data/3. Gao data/gao_sur_data.Rdata")
+```
+## 1.3 This study's data
+```{r}
+load("./1_raw_data/1.Proteomic data/152 samples and 4032 proteins .Rdata")
+load("./2_output_data/sur_data_152.data")
+load("./1_raw_data/1.Proteomic data/dec.Rdata")
+```
+# 2. Data Cleaning
+## 2.1 Missing value imputation for Jiang's data
+```{r}
+clean_jiang_exp <- jiang_raw_expression[apply(jiang_raw_expression[99:199],1,function(l) sum(!is.na(l))>101*0.4),#proteins identified more than 40% tumor samples
+                       99:199]   %>% as.matrix() %>%
+  impute.RegImpute(.,fillmethod = "row_mean",maxiter_RegImpute = 10,conv_nrmse = 1e-06) %>%
+                            2^. %>%
+  as.data.frame(.) %>% 
+  apply(.,2,function(x) x/median(x)) %>%
+  log2() %>%
+  as.data.frame()
+ 
+```
+## 2.2 Intersection of three cohots's data
+```{r}
+clean_gao_exp <- gao_raw_expression[1:159]
+clean_this_exp <- tumor_exp
+
+intersection_proteins <- dec$PG.Genes %>% is_in(dec$PG.ProteinGroups %>% is_in(intersect(rownames(clean_this_exp),rownames(clean_jiang_exp)) ) %>%
+  which() %>% dec$PG.Genes[.] %>% intersect(rownames(clean_gao_exp))) %>% which() %>%
+  dec$PG.ProteinGroups[.]
+
+intersection_genes <- dec$PG.ProteinGroups %>% is_in(intersection_proteins) %>%
+  which() %>% dec$PG.Genes[.]
+
+jiang_exp_prepared_1 <- clean_jiang_exp[intersection_proteins,]
+gao_exp_prepared_1 <- clean_gao_exp[intersection_genes,] %>% set_rownames(intersection_proteins)
+this_exp_prepared_1 <- clean_this_exp[intersection_proteins,]
+```
+## 2.3 Prognostic data of three cohors
+```{r}
+all.sur.data <- rbind(sur_data_152[c("OS.time","OS","RFS.time","RFS")],
+                      jiang_sur_data[c("Survival.months","Survival.status",
+                                       "Survival.months","Recurr.status")],
+                      gao_sur_data[c("Overall.survial..month.","Survial...1..dead..0..alive.",
+                                     "Recurrence.free.survival..month.","Overall.survial..month.")]) %>%
+                mutate(subtype =
+                     c(as.character(sur_data_152$sub761),
+                      jiang_sur_data$Proteomic.Subtype,
+                      gao_sur_data$Proteomic.subtype))
+```
+
+## 2.4 Scale expression data
+
+There is obvious batch effect in three cohort due to difference of data output platform. Then, all data were scaled for eliminating it.
+
+```{r}
+
+```
