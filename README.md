@@ -1,3 +1,7 @@
+  
+
+# Updating.........
+
 # Background
 
 Here, we provide major supplementary code used in following paper. The code involves method of "HCC proteomic subtype identification", "Simplified panel for discriminating proteomic subtypes", and "Drug sensitivity prediction model". For more details, please refer to the method section in the paper.
@@ -24,6 +28,7 @@ Here, we provide major supplementary code used in following paper. The code invo
 | aplot       | 0.1.6   | GSVA                 | 1.34.0  |
 | ggpubr      | 0.4.0   | caret                | 6.0-86  |
 | stringr     | 1.4.0   | rmarkdown            | 2.1.4   |
+| Borura      | 7.0.0   |                      |         |
 
 # Data analysis and statistics in R
 
