@@ -27,33 +27,43 @@ header-includes:
 rm(list = ls())
 options(stringsAsFactors = F)
 Sys.setlocale(locale = "English")
-pacman::p_load(magrittr,tidyr,stringr,dplyr,DMwR2,DreamAI,factoextra,FactoMineR,ggalluvial,ggforce)
+pacman::p_load(magrittr,tidyr,stringr,dplyr,DMwR2,DreamAI,factoextra,FactoMineR,ggalluvial,ggforce,caret,Boruta,parallel,do,pROC,ggpubr)
+windowsFonts(TNR=windowsFont("Times new Roman"))
 source("Function/Function.R")
 ```
-- Here, three cohorts' proteomic data was used to constitute  subtype identifing model.(Jiang et als.' data, Gao et als.' data and This study's data).
 
-- Only tumor sample's expression data was used in model building.
+-   Here, three cohorts' proteomic data was used to constitute subtype identifing model.(Jiang et als.' data, Gao et als.' data and This study's data).
+
+-   Only tumor sample's expression data was used in model building.
 
 # 1. Input data
 
 ## 1.1 Jiang et als.' data
+
 ```{r}
 load("./1_raw_data/2. Jiang data/jiang_raw_expression.Rdata")
 load("./1_raw_data/2. Jiang data/jiang_sur_data.Rdata")
 ```
+
 ## 1.2 Gao et als.' data
+
 ```{r}
 load("./1_raw_data/3. Gao data/gao_raw_expression.Rdata")
 load("./1_raw_data/3. Gao data/gao_sur_data.Rdata")
 ```
+
 ## 1.3 This study's data
+
 ```{r}
 load("./1_raw_data/1.Proteomic data/152 samples and 4032 proteins .Rdata")
 load("./2_output_data/sur_data_152.data")
 load("./1_raw_data/1.Proteomic data/dec.Rdata")
 ```
+
 # 2. Data Cleaning
+
 ## 2.1 Missing value imputation for Jiang's data
+
 ```{r}
 clean_jiang_exp <- jiang_raw_expression[apply(jiang_raw_expression[99:199],1,function(l) sum(!is.na(l))>101*0.4),#proteins identified more than 40% tumor samples
                        99:199]   %>% as.matrix() %>%
@@ -65,7 +75,9 @@ clean_jiang_exp <- jiang_raw_expression[apply(jiang_raw_expression[99:199],1,fun
   as.data.frame()
  
 ```
+
 ## 2.2 Intersection of three cohots's data
+
 ```{r}
 clean_gao_exp <- gao_raw_expression[1:159]
 clean_this_exp <- tumor_exp
@@ -81,23 +93,832 @@ jiang_exp_prepared_1 <- clean_jiang_exp[intersection_proteins,]
 gao_exp_prepared_1 <- clean_gao_exp[intersection_genes,] %>% set_rownames(intersection_proteins)
 this_exp_prepared_1 <- clean_this_exp[intersection_proteins,]
 ```
+
 ## 2.3 Prognostic data of three cohors
+
 ```{r}
 all.sur.data <- rbind(sur_data_152[c("OS.time","OS","RFS.time","RFS")],
-                      jiang_sur_data[c("Survival.months","Survival.status",
-                                       "Survival.months","Recurr.status")],
-                      gao_sur_data[c("Overall.survial..month.","Survial...1..dead..0..alive.",
-                                     "Recurrence.free.survival..month.","Overall.survial..month.")]) %>%
+                      jiang_sur_data[c("OS.time","OS","RFS.time","RFS")],
+                      gao_sur_data[c("OS.time","OS","RFS.time","RFS")]) %>%
                 mutate(subtype =
                      c(as.character(sur_data_152$sub761),
-                      jiang_sur_data$Proteomic.Subtype,
-                      gao_sur_data$Proteomic.subtype))
+                      jiang_sur_data$`subtype_by_Liu_sig(721)`,
+                      gao_sur_data$`subtype_by_gao_sig(1274)`))
 ```
 
 ## 2.4 Scale expression data
 
 There is obvious batch effect in three cohort due to difference of data output platform. Then, all data were scaled for eliminating it.
 
+### 2.4.1 Data distribution before removal of batch effects
+
 ```{r}
+all_batch_data <- cbind(this_exp_prepared_1,jiang_exp_prepared_1,gao_exp_prepared_1)
+p2.4.1 <- Plot_pca(PCA(t(all_batch_data)),group = c(rep("This cohort",152),rep("Jiang's cohort",101),
+                                     rep("Gao's cohort",159)))
+p2.4.1
+```
+
+### 2.4.2 Data distribution afte removal of batch effects
+
+```{r}
+all_no_batch_data <- cbind(this_exp_prepared_1 %>% t() %>% scale() %>% t() %>% as.data.frame(),
+                           jiang_exp_prepared_1%>% t() %>% scale() %>% t() %>% as.data.frame(),
+                           gao_exp_prepared_1%>% t() %>% scale() %>% t() %>% as.data.frame())
+p2.4.2 <- Plot_pca(PCA(t(all_no_batch_data)),group = c(rep("This cohort",152),rep("Jiang's cohort",101),
+                                     rep("Gao's cohort",159)))
+p2.4.2
+```
+
+# 3. Partitioning the training and validation sets
+
+## 3.1 training
+
+```{r}
+train_data <- rbind(t(this_exp_prepared_1 %>% t() %>% scale() %>% t() %>% as.data.frame()),
+                    t(jiang_exp_prepared_1%>% t() %>% scale() %>% t() %>% as.data.frame())) %>% 
+                    as.data.frame()
+train_group <- all.sur.data[rownames(train_data),"subtype"] 
+colnames(train_data) <- dec$PG.Genes[match(colnames(train_data),dec$PG.ProteinGroups)] %>%
+  gsub("-","_",.)
+train_data[train_data >2] <- 2
+train_data[train_data < -2] <- -2
+```
+
+## 3.2 validation
+
+```{r}
+var_data<- t(gao_exp_prepared_1%>% t() %>% scale() %>% t() %>% as.data.frame()) %>% as.data.frame()
+var_group <- all.sur.data[rownames(var_data),"subtype"]
+colnames(var_data) <- dec$PG.Genes[match(colnames(var_data),dec$PG.ProteinGroups)] %>%
+  gsub("-","_",.)
+var_data[var_data < -2] <- -2
+var_data[var_data < -2] <- -2
+```
+
+# 4. Feature section
+
+## 4.1 comparison between any two of three subtypes
+
+```{r}
+
+train.sub.diff <- lapply(rownames(t(train_data)),function(i){
+  x = t(train_data)[i,]
+  SIvsSII.count = 0
+  SIvsSIII.count = 0
+  SIIvsSIII.count = 0
+  SIvsSII.FC = c()
+  SIIvsSIII.FC =c()
+  SIvsSIII.FC=c()
+  #Repeat Random Sampling 50 times(80% samples per time)
+  for(i in 1:50){
+    
+    index = createDataPartition(train_group,p = 0.8 )
+
+    exp = t(x)[index$Resample1]
+    
+    sample = rownames(train_data)[index$Resample1]
+
+    s1 = which(sample %in% rownames(all.sur.data)[all.sur.data$subtype=="SI"])
+    s2 = which(sample %in% rownames(all.sur.data)[all.sur.data$subtype=="SII"])
+    s3 = which(sample %in% rownames(all.sur.data)[all.sur.data$subtype=="SIII"])
+
+    SIvsSII.p = wilcox.test(exp[s1],exp[s2])[[3]];
+    SIIvsSIII.p = wilcox.test(exp[s3],exp[s2])[[3]];
+    SIvsSIII.p = wilcox.test(exp[s1],exp[s3])[[3]];
+
+    SIvsSII.fc = 2^(mean(exp[s1]) - mean(exp[s2]))
+    SIIvsSIII.fc = 2^(mean(exp[s2]) - mean(exp[s3]))
+    SIvsSIII.fc = 2^(mean(exp[s1]) - mean(exp[s3]))
+
+    if(SIvsSII.p<0.01&(SIvsSII.fc>log2(1.5)|SIvsSII.fc<log2(1/1.5))){
+      SIvsSII.count = SIvsSII.count + 1
+      SIvsSII.FC = c(SIvsSII.FC,SIvsSII.fc)
+    }
+    if(SIIvsSIII.p<0.01&(SIIvsSIII.fc>log2(1.5)|SIIvsSIII.fc<log2(1/1.5))){
+      SIIvsSIII.count = SIIvsSIII.count + 1
+      SIIvsSIII.FC = c(SIIvsSIII.FC,SIIvsSIII.fc)
+    }
+    if(SIvsSIII.p<0.01&(SIvsSIII.fc>log2(1.5)|SIvsSIII.fc<log2(1/1.5))){
+      SIvsSIII.count = SIvsSIII.count + 1
+      SIvsSIII.FC = c(SIvsSIII.FC,SIvsSIII.fc)
+    }
+  }
+
+  if(length(SIvsSII.FC)>0){
+    SIvsSII.FC.p = wilcox.test(SIvsSII.FC)[[3]]
+    SIvsSII.FC.m = mean(SIvsSII.FC)
+  }else{
+    SIvsSII.FC.p = 1
+    SIvsSII.FC.m = 0
+  }
+  if(length(SIIvsSIII.FC)>0){
+    SIIvsSIII.FC.p = wilcox.test(SIIvsSIII.FC)[[3]]
+    SIIvsSIII.FC.m = mean(SIIvsSIII.FC)
+  }else{
+    SIIvsSIII.FC.p = 1
+    SIIvsSIII.FC.m = 0
+  }
+  if(length(SIvsSIII.FC)>0){
+    SIvsSIII.FC.p = wilcox.test(SIvsSIII.FC)[[3]]
+    SIvsSIII.FC.m = mean(SIvsSIII.FC)
+  }else{
+    SIvsSIII.FC.p = 1
+    SIvsSIII.FC.m = 0
+  }
+
+  return(data.frame(SIvsSII.count = SIvsSII.count,
+                    SIIvsSIII.count = SIIvsSIII.count,
+                    SIvsSIII.count = SIvsSIII.count,
+                    SIvsSII.FC.p =  SIvsSII.FC.p,
+                    SIvsSII.FC.m = SIvsSII.FC.m ,
+                    SIIvsSIII.FC.p =  SIIvsSIII.FC.p ,
+                    SIIvsSIII.FC.m = SIIvsSIII.FC.m ,
+                    SIvsSIII.FC.p =SIvsSIII.FC.p,
+                    SIvsSIII.FC.m = SIvsSIII.FC.m
+  )
+
+  )
+}) %>%  do.call(rbind,.)
+```
+
+## 4.2 comparison between any one subtype and the other two subtypes
+
+```{r}
+train.sub.diff2 <- lapply(colnames(train_data),function(i){
+  x = t(t(train_data)[i,])
+  
+  SI.count = 0
+  SIII.count = 0
+  SII.count = 0
+  SI.FC = c()
+  SIII.FC =c()
+  SII.FC=c()
+  
+  for(i in 1:50){
+    
+    index = createDataPartition(train_group,p = 0.8 )
+    
+    exp = t(x)[index$Resample1]
+    sample = rownames(train_data)[index$Resample1]
+   
+    s1 = which(sample %in% rownames(all.sur.data)[all.sur.data$subtype=="SI"])
+    s2 = which(sample %in% rownames(all.sur.data)[all.sur.data$subtype=="SII"])
+    s3 = which(sample %in% rownames(all.sur.data)[all.sur.data$subtype=="SIII"])
+
+    SI.p = wilcox.test(exp[s1],exp[s2])[[3]];
+    SII.p = wilcox.test(exp[s3],exp[s2])[[3]];
+    SIII.p = wilcox.test(exp[s1],exp[s3])[[3]];
+
+    SI.fc = 2^(mean(exp[s1]) - mean(exp[s2]))
+    SII.fc = 2^(mean(exp[s2]) - mean(exp[s3]))
+    SIII.fc = 2^(mean(exp[s1]) - mean(exp[s3]))
+
+    if(SI.p<0.01&(SI.fc>log2(1.5)|SI.fc<log2(1/1.5))){
+      SI.count = SI.count + 1
+      SI.FC = c(SI.FC,SI.fc)
+    }
+    if(SII.p<0.01&(SII.fc>log2(1.5)|SII.fc<log2(1/1.5))){
+      SII.count = SII.count + 1
+      SII.FC = c(SII.FC,SII.fc)
+    }
+    if(SIII.p<0.01&(SIII.fc>log2(1.5)|SIII.fc<log2(1/1.5))){
+      SIII.count = SIII.count + 1
+      SIII.FC = c(SIII.FC,SIII.fc)
+    }
+  }
+  
+  if(length(SI.FC)>0){
+    SI.FC.p = wilcox.test(SI.FC)[[3]]
+    SI.FC.m = mean(SI.FC)
+  }else{
+    SI.FC.p = 1
+    SI.FC.m = 0
+  }
+  if(length(SII.FC)>0){
+    SII.FC.p = wilcox.test(SII.FC)[[3]]
+    SII.FC.m = mean(SII.FC)
+  }else{
+    SII.FC.p = 1
+    SII.FC.m = 0
+  }
+  if(length(SIII.FC)>0){
+    SIII.FC.p = wilcox.test(SIII.FC)[[3]]
+    SIII.FC.m = mean(SIII.FC)
+  }else{
+    SIII.FC.p = 1
+    SIII.FC.m = 0
+  }
+
+  return(data.frame(SI.count = SI.count,
+                    SII.count = SII.count,
+                    SIII.count = SIII.count,
+                    SI.FC.p =  SI.FC.p,
+                    SI.FC.m = SI.FC.m ,
+                    SII.FC.p =  SII.FC.p ,
+                    SII.FC.m = SII.FC.m ,
+                    SIII.FC.p = SIII.FC.p,
+                    SIII.FC.m = SIII.FC.m
+  )
+  )
+}) %>%  do.call(rbind,.)
+rownames(train.sub.diff) <- colnames(train_data)
+rownames(train.sub.diff2) <- colnames(train_data)
+```
+
+## 4.3 intersection
+
+```{r}
+#comparison between any two of three subtypes
+sig1 <-  train.sub.diff %>% filter(.,SIvsSII.count>40& (abs(log2(SIvsSII.FC.m))>0.58)|
+                                     SIIvsSIII.count>40&(abs(log2(SIIvsSIII.FC.m))>0.58)|
+                                     SIIvsSIII.count>40&(abs(log2(SIvsSIII.FC.m))>0.58)
+                                     )
+#comparison between any one subtype and the other two subtypes
+sig2 <-  train.sub.diff2 %>% filter(.,SI.count>40& (abs(log2(SI.FC.m))>0.58)|
+                                     SII.count>40&(abs(log2(SII.FC.m))>0.58)|
+                                     SIII.count>40&(abs(log2(SIII.FC.m))>0.58)
+                                     )
+sig3 <- intersect(rownames(sig1),rownames(sig2))      
+
+
+```
+
+## 4.4 remove hihg correlation proteins
+
+```{r}
+train_sig3_exp <- train_data[sig3]
+descrCorr = cor(train_sig3_exp)
+highCorr = findCorrelation(descrCorr, 0.9)
+train_sig4_exp = train_sig3_exp[, -highCorr]
+colnames(train_sig4_exp) <- gsub("-","_",colnames(train_sig4_exp))
+
+```
+
+## 4.5 Boruta
+
+### 4.5.1 Boruta for (SI vs others)
+
+```{r}
+boruta.data  <-  train_sig4_exp %>%
+  mutate(subtype=as.factor(gsub("SIII","SII",train_group )))
+boru.rf <- Boruta(subtype~.,data=boruta.data, pValue = 0.01, mcAdj = TRUE, doTrace = 2)
+boru.rf.result <- boru.rf$finalDecision %>% as.data.frame()
+boru.rf.confirm_SI <- rownames(boru.rf.result)[boru.rf.result$.=="Confirmed"]
+```
+
+### 4.5.2 Boruta for (SII vs others)
+
+```{r}
+
+boruta.data  <-  train_sig4_exp %>%
+  mutate(subtype=as.factor(gsub("^SII$","SI",train_group )))
+boru.rf <- Boruta(subtype~.,data=boruta.data, pValue = 0.01, mcAdj = TRUE, doTrace = 2)
+boru.rf.result <- boru.rf$finalDecision %>% as.data.frame()
+boru.rf.confirm_SIII <- rownames(boru.rf.result)[boru.rf.result$.=="Confirmed"]
+```
+
+# 5 knn model for SIvsOthers
+
+```{r}
+control <- trainControl(method="cv",5,summaryFunction=twoClassSummary,classProbs = TRUE)
+```
+
+## 5.1 Get Importance Ranking
+
+```{r}
+knn_SI_1 <- train_data[boru.rf.confirm_SI] %>%
+  mutate(subtype=as.factor(gsub("SIII","SII",train_group_2)))
+knn_SI_result1 <- train(subtype~.,knn_SI_1,
+              method = 'knn',
+              trControl = control,
+              tuneLength = 30,
+              metric="ROC",
+)
+
+knn_SI_result1_im <- varImp(knn_SI_result1)[[1]]
+knn_SI_result1_im <- rownames(knn_SI_result1_im)[order(knn_SI_result1_im$SI,decreasing = T)]
+```
+
+## 5.2 Forward selection method based on importance ranking
+
+```{r}
+cl <- makeCluster(30)
+clusterExport(cl,varlist = c("train_data","knn_SI_result1_im","train_group","control"))
+knn_SI_result2 <- parLapply(cl,1:30,function(i){
+  pacman::p_load("caret","do","magrittr","dplyr")
+  message(paste0("第",i,"个蛋白"))
+  #i=1
+  t.data <- train_data[knn_SI_result1_im[c(1:i)]] %>%
+    mutate(subtype=as.factor(gsub("SIII","SII",train_group)))
+  t.summary <- lapply(1:30,function(x){
+    
+    t.model <- train(subtype~.,t.data,
+                     method = 'knn',
+                     #preProcess = c('center','scale'),
+                     trControl = control,
+                     tuneLength = 30,
+                     metric="ROC"
+                     
+    )
+    
+    
+    
+    return(data.frame(
+      AUC = t.model[["resample"]][1] %>% t() %>% mean(),
+      Sens = t.model[["resample"]][2] %>% t() %>% mean(),
+      Spec = t.model[["resample"]][3] %>% t() %>% mean()
+    ))
+  }) %>% do.call(rbind,.) %>% t() %>% as.data.frame()
+  
+  t.summary$M <- apply(t.summary,1,mean)
+  t.summary$sd <- apply(t.summary,1,sd)
+  return(t.summary)
+})
+stopCluster(cl)
+
+# 绘制蛋白累积折线图
+knn_SI_accumulate <- do.call(rbind,knn_SI_result2)[31:32]
+knn_SI_accumulate$tag <- rep(c("AUC","Sens","Spec"))
+knn_SI_accumulate$tag2 <- rep(c(1:30),each=3)
+knn_SI_accumulate$tag3 <- ifelse((knn_SI_accumulate$tag %in% c("Sens","Spec")) &
+                                 (knn_SI_accumulate$tag2 %in% c("4","5")),"Rejected","Accepeted"
+)
+p5.2 <- ggplot(data = knn_SI_accumulate,aes(x=tag2,y=M))+
+  
+  geom_segment(x=20,xend=20,y=0.65,yend=1,color="red",size=0.8,linetype=2)+
+  geom_errorbar(aes(ymin=M-sd,ymax=M+sd,width=.1),color="grey40")+
+  geom_line(aes(group=tag,color=tag),size=1)+
+  geom_point(aes(shape=tag3,color=tag3))+
+  
+  scale_x_continuous(breaks = c(1:30))+
+  scale_y_continuous(breaks = seq(0.5,1,0.025),limits = c(0.65,1))+
+  theme_classic()+
+  scale_color_manual(breaks = c("Rejected","Accepeted","AUC","Sens","Spec"),
+                     values = c("red","black","#845EC2","#936C00","#008CCC"))+
+  labs(x="Number of proteins used in knn model",y="",color="")+
+  theme(text = element_text(family = "TNR",face="bold",color = "black",size = 10),
+        axis.title  = element_text(size = 15),
+        legend.text = element_text(size = 13))
+
+cairo_pdf(filename = "./3_output_figure/subtype_panel_SIvsOthers_forwardsection_1.pdf",width = 6,height = 5)
+p5.2
+dev.off()
+
+```
+
+Through the "p5.2" picture, we found there was no more significant change in model accuracy from the fourth proteins, but the sensitivity fluctuated more. In particular, the third and fourth proteins caused a substantial decrease in sensitivity, so we removed these two proteins in the next model training.
+
+## 5.3 Forward selection method based on importance ranking_2
+
+```{r}
+knn_SI_result1_im_2  <- knn_SI_result1_im[-4:-5]
+cl <- makeCluster(30)
+clusterExport(cl,varlist = c("train_data","knn_SI_result1_im_2","train_group","control"))
+knn_SI_result3 <- parLapply(cl,c(1:30),function(i){
+  pacman::p_load("caret","do","magrittr","dplyr")
+  #i=1
+  t.data <- train_data[knn_SI_result1_im_2[c(1:i)]] %>%
+    mutate(subtype=as.factor(gsub("SIII","SII",train_group)))
+  t.summary <- lapply(1:30,function(x){
+    
+    t.model <- train(subtype~.,t.data,
+                     method = 'knn',
+                     #preProcess = c('center','scale'),
+                     trControl = control,
+                     tuneLength = 30,
+                     metric="ROC"
+                     
+    )
+    
+    
+    
+    return(data.frame(
+      AUC = t.model[["resample"]][1] %>% t() %>% mean(),
+      Sens = t.model[["resample"]][2] %>% t() %>% mean(),
+      Spec = t.model[["resample"]][3] %>% t() %>% mean()
+    ))
+  }) %>% do.call(rbind,.) %>% t() %>% as.data.frame()
+  
+  t.summary$M <- apply(t.summary,1,mean)
+  t.summary$sd <- apply(t.summary,1,sd)
+  return(t.summary)
+})
+stopCluster(cl)
+knn_SI_accumulate2 <- do.call(rbind,knn_SI_result3)[31:32]
+knn_SI_accumulate2$tag <- rep(c("AUC","Sens","Spec"))
+knn_SI_accumulate2$tag2 <- rep(c(1:30),each=3)
+knn_SI_accumulate2$tag3 <- ifelse((knn_SI_accumulate2$tag %in% c("Sens","Spec")) &
+                                 (knn_SI_accumulate2$tag2 %in% "4"),"Rejected","Accepeted"
+)
+p5.3 <- ggplot(data = knn_SI_accumulate2,aes(x=tag2,y=M))+
+  
+  geom_segment(x=18,xend=18,y=0.65,yend=1,color="red",size=0.8,linetype=2)+
+  geom_errorbar(aes(ymin=M-sd,ymax=M+sd,width=.1),color="grey30")+
+  geom_line(aes(group=tag,color=tag),size=1)+
+  geom_point(aes(color=tag3,shape=tag3))+
+  
+  scale_x_continuous(breaks = c(1:30))+
+  scale_y_continuous(breaks = seq(0.5,1,0.025),limits = c(0.65,1))+
+  theme_classic()+
+  scale_color_manual(breaks = c("Rejected","Accepeted","AUC","Sens","Spec"),
+                     values = c("red","black","#845EC2","#936C00","#008CCC"))+
+  labs(x="Number of proteins used in knn model",y="",color="")+
+  theme(text = element_text(family = "TNR",face="bold",color = "black",size = 10),
+        axis.title  = element_text(size = 15),
+        legend.text = element_text(size = 13))
+
+cairo_pdf(filename = "./3_output_figure/subtype_panel_SIvsOthers_forwardsection_2.pdf",width = 6,height = 5)
+p5.3
+dev.off()
+```
+
+In a new round of training, we found that the 4th protein (formerly the 6th protein) led to a decrease in sensitivity.So the protein 6 was also rejected.
+
+## 5.4 Forward selection method based on importance ranking_3
+
+```{r}
+knn_SI_result1_im_3  <- knn_SI_result1_im[-4:-6]
+cl <- makeCluster(30)
+clusterExport(cl,varlist = c("train_data","knn_SI_result1_im_3","train_group","control"))
+knn_SI_result4 <- parLapply(cl,c(1:30),function(i){
+  pacman::p_load("caret","do","magrittr","dplyr")
+  #i=1
+  t.data <- train_data[knn_SI_result1_im_3[c(1:i)]] %>%
+    mutate(subtype=as.factor(gsub("SIII","SII",train_group)))
+  t.summary <- lapply(1:30,function(x){
+    
+    t.model <- train(subtype~.,t.data,
+                     method = 'knn',
+                     #preProcess = c('center','scale'),
+                     trControl = control,
+                     tuneLength = 30,
+                     metric="ROC"
+                     
+    )
+    
+    
+    
+    return(data.frame(
+      AUC = t.model[["resample"]][1] %>% t() %>% mean(),
+      Sens = t.model[["resample"]][2] %>% t() %>% mean(),
+      Spec = t.model[["resample"]][3] %>% t() %>% mean()
+    ))
+  }) %>% do.call(rbind,.) %>% t() %>% as.data.frame()
+  
+  t.summary$M <- apply(t.summary,1,mean)
+  t.summary$sd <- apply(t.summary,1,sd)
+  return(t.summary)
+})
+stopCluster(cl)
+knn_SI_accumulate3 <- do.call(rbind,knn_SI_result4)[31:32]
+knn_SI_accumulate3$tag <- rep(c("AUC","Sens","Spec"))
+knn_SI_accumulate3$tag2 <- rep(c(1:30),each=3)
+
+p5.4 <- ggplot(data = knn_SI_accumulate3,aes(x=tag2,y=M))+
+  
+  geom_segment(x=4,xend=4,y=0.65,yend=1,color="red",size=0.8,linetype=2)+
+  geom_errorbar(aes(ymin=M-sd,ymax=M+sd,width=.1),color="grey30")+
+  geom_line(aes(group=tag,color=tag),size=1)+
+  geom_point()+
+  
+  scale_x_continuous(breaks = c(1:30))+
+  scale_y_continuous(breaks = seq(0.5,1,0.025),limits = c(0.65,1))+
+  theme_classic()+
+  scale_color_manual(values = c("#845EC2","#936C00","#008CCC"))+
+  labs(x="Number of proteins used in knn model",y="",color="")+
+  theme(text = element_text(family = "Times New Roman",face="bold",color = "black",size = 10),
+        axis.title  = element_text(size = 15),
+        legend.text = element_text(size = 13))
+
+cairo_pdf(filename = "./3_output_figure/subtype_panel_SIvsOthers_forwardsection_3.pdf",width = 6,height = 5)
+p5.4
+dev.off()
+```
+
+Ultimately, we found that the performance of the models built using the first four and the seventh protein were more balanced 
+##  5.5 the end
+
+```{r}
+knn_SI_end <- train_data[knn_SI_result1_im[c(1:3,7)]] %>%
+  mutate(subtype=as.factor(gsub("SIII","SII",train_group)))
+set.seed(1)
+knn_SI_result_end <- train(subtype~.,knn_SI_end ,
+              method = 'knn',
+              #preProcess = c('center','scale'),
+              trControl = control,
+              tuneLength = 30,
+              metric="ROC"
+              
+)
+predict(knn_SI_result_end,var_data) %>% confusionMatrix(.,as.factor(gsub("SIII","SII",var_group)))
+```
+
+ Confusion Matrix and Statistics
+
+               Accuracy : 0.8868         
+                 95% CI : (0.827, 0.9315)
+    No Information Rate : 0.6478         
+    P-Value [Acc > NIR] : 5.661e-12      
+                                         
+                  Kappa : 0.7478         
+                                         
+Mcnemar's Test P-Value : 0.4795
+
+            Sensitivity : 0.8036         
+            Specificity : 0.9320         
+         Pos Pred Value : 0.8654         
+         Neg Pred Value : 0.8972         
+             Prevalence : 0.3522         
+         Detection Rate : 0.2830         
+
+Detection Prevalence : 0.3270\
+Balanced Accuracy : 0.8678
+
+       'Positive' Class : SI   
+
+# 6 knn model for SIIIvsOthers
+
+## 6.1 Get Importance Ranking
+
+```{r}
+knn_SIII_1 <- train_data[boru.rf.confirm_SIII] %>%
+  mutate(subtype=as.factor(gsub("^SII$","SI",train_group)))
+knn_SIII_result1 <- train(subtype~.,knn_SIII_1,
+              method = 'knn',
+              trControl = control,
+              tuneLength = 30,
+              metric="ROC",
+)
+
+knn_SIII_result1_im <- varImp(knn_SIII_result1)[[1]]
+knn_SIII_result1_im <- rownames(knn_SIII_result1_im)[order(knn_SIII_result1_im$SI,decreasing = T)]
+```
+
+## 6.2 Forward selection method based on importance ranking
+
+```{r}
+cl <- makeCluster(30)
+clusterExport(cl,varlist = c("train_data","knn_SIII_result1_im","train_group","control"))
+knn_SIII_result2 <- parLapply(cl,1:30,function(i){
+  pacman::p_load("caret","do","magrittr","dplyr")
+  #i=1
+  t.data <- train_data[knn_SIII_result1_im[c(1:i)]] %>%
+    mutate(subtype=as.factor(gsub("^SII$","SI",train_group)))
+  t.summary <- lapply(1:30,function(x){
+    
+    t.model <- train(subtype~.,t.data,
+                     method = 'knn',
+                     #preProcess = c('center','scale'),
+                     trControl = control,
+                     tuneLength = 30,
+                     metric="ROC"
+                     
+    )
+    
+    
+    
+    return(data.frame(
+      AUC = t.model[["resample"]][1] %>% t() %>% mean(),
+      Sens = t.model[["resample"]][2] %>% t() %>% mean(),
+      Spec = t.model[["resample"]][3] %>% t() %>% mean()
+    ))
+  }) %>% do.call(rbind,.) %>% t() %>% as.data.frame()
+  
+  t.summary$M <- apply(t.summary,1,mean)
+  t.summary$sd <- apply(t.summary,1,sd)
+  return(t.summary)
+})
+stopCluster(cl)
+
+# 绘制蛋白累积折线图
+knn_SIII_accumulate <- do.call(rbind,knn_SIII_result2)[31:32]
+knn_SIII_accumulate$tag <- rep(c("AUC","Sens","Spec"))
+knn_SIII_accumulate$tag2 <- rep(c(1:30),each=3)
+knn_SIII_accumulate$tag3 <- ifelse((knn_SIII_accumulate$tag %in% c("Sens","Spec")) &
+                                 (knn_SIII_accumulate$tag2 %in% c("3","4","5","6","7","10","12")),"Rejected","Accepeted"
+)
+
+p6.2 <- ggplot(data = knn_SIII_accumulate,aes(x=tag2,y=M))+
+  
+  geom_segment(x=13,xend=13,y=0.75,yend=1,color="red",size=0.8,linetype=2)+
+  geom_errorbar(aes(ymin=M-sd,ymax=M+sd,width=.1),color="grey30")+
+  geom_line(aes(group=tag,color=tag),size=1)+
+  geom_point(aes(shape=tag3,color=tag3))+
+  
+  scale_x_continuous(breaks = c(1:30))+
+  scale_y_continuous(breaks = seq(0.5,1,0.025),limits = c(0.7,1))+
+  theme_classic()+
+  scale_color_manual(breaks = c("Rejected","Accepeted","AUC","Sens","Spec"),
+                     values = c("red","black","#845EC2","#936C00","#008CCC"))+
+  labs(x="Number of proteins used in knn model",y="",color="")+
+  theme(text = element_text(family = "TNR",face="bold",color = "black",size = 10),
+        axis.title  = element_text(size = 15),
+        legend.text = element_text(size = 13))
+
+cairo_pdf(filename = "./3_output_figure/subtype_panel_SIIIvsOthers_forwardsection_1.pdf",width = 6,height = 5)
+p6.2
+dev.off()
+```
+Through the picture "p6.2", we found there was no more significant change in model accuracy from the fourth proteins, but the sensitivity fluctuated more. In particular, the (3,4,5,6,7,10,12) proteins caused a substantial decrease in sensitivity, so we removed these seven proteins in the next model training.
+
+## 6.3 Forward selection method based on importance ranking_2
+
+```{r}
+cl <- makeCluster(30)
+knn_SIII_result1_im_2 <- knn_SIII_result1_im[c(-3:-7,-10,-12)]
+clusterExport(cl,varlist = c("train_data","knn_SIII_result1_im_2","train_group","control"))
+knn_SIII_result3 <- parLapply(cl,1:30,function(i){
+  pacman::p_load("caret","do","magrittr","dplyr")
+  #i=1
+  t.data <- train_data[knn_SIII_result1_im_2[c(1:i)]] %>%
+    mutate(subtype=as.factor(gsub("^SII$","SI",train_group)))
+  t.summary <- lapply(1:30,function(x){
+    
+    t.model <- train(subtype~.,t.data,
+                     method = 'knn',
+                     #preProcess = c('center','scale'),
+                     trControl = control,
+                     tuneLength = 30,
+                     metric="ROC"
+                     
+    )
+    
+    
+    
+    return(data.frame(
+      AUC = t.model[["resample"]][1] %>% t() %>% mean(),
+      Sens = t.model[["resample"]][2] %>% t() %>% mean(),
+      Spec = t.model[["resample"]][3] %>% t() %>% mean()
+    ))
+  }) %>% do.call(rbind,.) %>% t() %>% as.data.frame()
+  
+  t.summary$M <- apply(t.summary,1,mean)
+  t.summary$sd <- apply(t.summary,1,sd)
+  return(t.summary)
+})
+stopCluster(cl)
+
+# 绘制蛋白累积折线图
+knn_SIII_accumulate2 <- do.call(rbind,knn_SIII_result3)[31:32]
+knn_SIII_accumulate2$tag <- rep(c("AUC","Sens","Spec"))
+knn_SIII_accumulate2$tag2 <- rep(c(1:30),each=3)
+
+
+p6.3 <- ggplot(data = knn_SIII_accumulate2, aes(x=tag2,y=M))+
+  
+  geom_segment(x=6,xend=6,y=0.75,yend=1,color="red",size=0.8,linetype=2)+
+  geom_errorbar(aes(ymin=M-sd,ymax=M+sd,width=.1),color="grey30")+
+  geom_line(aes(group=tag,color=tag),size=1)+
+  geom_point()+
+  
+  scale_x_continuous(breaks = c(1:30))+
+  scale_y_continuous(breaks = seq(0.5,1,0.025),limits = c(0.7,1))+
+  theme_classic()+
+  scale_color_manual(values = c("#845EC2","#936C00","#008CCC"))+
+  labs(x="Number of proteins used in knn model",y="",color="")+
+  theme(text = element_text(family = "Times New Roman",face="bold",color = "black",size = 10),
+        axis.title  = element_text(size = 15),
+        legend.text = element_text(size = 13))
+
+cairo_pdf(filename = "./3_output_figure/subtype_panel_SIIIvsOthers_forwardsection_2.pdf",width = 6,height = 5)
+p6.3
+dev.off()
+```
+1,2,8,9,11,13 proteins were selected
+## 6.4 the end
+
+
+```{r}
+knn_SIII_end <- train_data[knn_SIII_result1_im[c(1:2,8,9,11,13)]] %>%
+  mutate(subtype=as.factor(gsub("^SII$","SI",train_group)))
+set.seed(29)
+knn_SIII_result_end <- train(subtype~.,knn_SIII_end ,
+              method = 'knn',
+              #preProcess = c('center','scale'),
+              trControl = control,
+              tuneLength = 30,
+              metric="ROC"
+              
+)
+
+predict(knn_SIII_result_end,var_data) %>% confusionMatrix(.,as.factor(gsub("^SII$","SI",var_group)))
+```
+Confusion Matrix and Statistics
+                                          
+               Accuracy : 0.956           
+                 95% CI : (0.9114, 0.9821)
+    No Information Rate : 0.6981          
+    P-Value [Acc > NIR] : <2e-16          
+                                          
+                  Kappa : 0.8974          
+                                          
+ Mcnemar's Test P-Value : 0.4497          
+                                          
+            Sensitivity : 0.9550          
+            Specificity : 0.9583          
+         Pos Pred Value : 0.9815          
+         Neg Pred Value : 0.9020          
+             Prevalence : 0.6981          
+         Detection Rate : 0.6667          
+   Detection Prevalence : 0.6792          
+      Balanced Accuracy : 0.9566          
+                                          
+       'Positive' Class : SI 
+# 7. Integration of two models
+```{r}
+SI_SII.predict = predict(knn_SI_result_end,var_data) %>% gsub("^SII$","SII+SIII",.) %>%
+  as.data.frame() %>% set_rownames(rownames(var_data))
+SI_SIII.predict = predict(knn_SIII_result_end,var_data) %>% gsub("^SI$","SI+SII",.) %>%
+  as.data.frame() %>% set_rownames(rownames(var_data))
+
+end <- cbind(SI_SII.predict,SI_SIII.predict)
+colnames(end) <- c("m1","m2")
+
+end$end <- ifelse(end$m1=="SI"&end$m2=="SI+SII","SI",
+                  ifelse(end$m1=="SII+SIII"&end$m2=="SIII","SIII","SII"))
+end$sub <- var_group
+
+caret::confusionMatrix(factor(end$sub),
+                       factor(end$end))
+```
+## 7.1 Figure2G Muti-ROC curve 
+```{r}
+end$SI <- end$sub %>% gsub("SIII","SII",.)
+end$SI.p <- end$end %>% gsub("SIII","SII",.)
+end$SIII <- end$sub %>% gsub("^SII$","SI",.)
+end$SIII.p <- end$end %>% gsub("^SII$","SI",.)
+end$SII <- end$sub %>% gsub("SIII","SI",.)
+end$SII.p <- end$end %>% gsub("SIII","SI",.)
+roc1 <- roc(end$SI%>% as.factor()  ,end$SI.p %>% as.factor() %>% as.numeric() )
+roc2 <- roc(end$SIII%>% as.factor()  ,end$SIII.p %>% as.factor() %>% as.numeric() )
+roc3 <- roc(end$SII%>% as.factor()  ,end$SII.p %>% as.factor() %>% as.numeric() )
+multiclass.roc(end$sub %>% as.factor(),end$end %>% as.factor() %>% as.numeric()) -> mulirc
+
+ mul.roc.p <- ggroc(list(roc1,roc3,roc2))+
+  geom_line(aes(color=name),size=1.2)+
+  scale_color_manual(values = c("green","blue","red"),label=c("SI vs SII&SIII","SII vs SI&SIII","SIII vs SI&SII"))+
+  theme_bw()+
+  theme(#axis.line = element_line(size=1),
+        plot.background = element_blank(),
+        panel.grid = element_blank(),
+        panel.border = element_rect(size=1.3,color="black"),
+        axis.text = element_text(family = "TNR",color = "black",size=12),
+        axis.title = element_text(family = "TNR",size = 15),
+        legend.title = element_blank(),
+        legend.position = "top",
+        legend.text = element_text(family = "TNR",size=10)
+        )+
+  geom_segment(x=1,xend=-1,y=2,yend=0,linetype=2,color="grey",size=0.8)+
+  geom_text(aes(x=0.3,y=0.8,label="Multi-class area under the curve: 0.925"))
+ 
+ auc.table <- data.frame(
+  SI=c(0.865,0.897,0.867),
+  SII=c(0.758,0.891,0.832),
+  SIII = c(0.918,0.972,0.950),
+  row.names = c("Sensitivity","Specificity","AUC"))
+roc.table <- ggtexttable(auc.table,theme = ttheme("light",rownames.style = rownames_style(face="bold")))%>%
+                table_cell_bg(.,row=4,column = 4,fill="red")
+
+
+cairo_pdf(filename = "./3_output_figure/F2G_1.pdf",width = 6,height = 5)
+ mul.roc.p
+dev.off()
+
+cairo_pdf(filename = "./3_output_figure/F2G_2.pdf",width = 6,height = 5)
+roc.table
+dev.off()
+```
+## 7.2 Figure2H sankey plot
+```{r}
+sankey.data <- data.frame(Cohort = rep(c("Response","Predictor"),each=159),
+                          response = c(end$sub,end$end) %>% factor(.,levels = c("SIII","SII","SI")),
+                          subject = rep(c(1:159),2),
+                          freq = 1)
+
+sankey.plot <- ggplot(sankey.data,
+       aes(x = Cohort, stratum = response%>% factor(.,levels = c("SIII","SII","SI")),
+           alluvium = subject,
+           y = freq,
+           fill = response, label = response)) +
+  scale_x_discrete(expand = c(.1, .1)) +
+  geom_flow(color="black",size=0.8) +
+  geom_stratum(alpha = .8,size=1) +
+  geom_text(stat = "stratum", size = 4)+
+  coord_flip()+
+  theme(panel.background = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())+
+  scale_fill_manual(values = c("#FB050B","#0081FF","#009944"))
+cairo_pdf(filename = "./3_output_figure/F2H.pdf",width = 6,height = 3)
+sankey.plot
+dev.off()
+
+```
+# save
+
+```{r}
+save(list = ls(),file = "./2_output_data/2.Constitute 9-proteins' HCC proteomic subtypes identifing model.Rdata")
 
 ```
