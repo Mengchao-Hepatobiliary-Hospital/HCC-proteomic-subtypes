@@ -1,5 +1,3 @@
-  
-
 # Updating.........
 
 # Background
