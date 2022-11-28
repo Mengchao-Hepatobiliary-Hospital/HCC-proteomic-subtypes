@@ -38,6 +38,16 @@ Here, we provide major supplementary code used in following paper. The code invo
 
 -   **Simplified panel for discriminating proteomic subtypes**
 
+    Our cohort (n=152) and Jiang et al.'s cohort (n=101) were used as the training set for model training and parameter tuning. And Gao et al.'s cohort was used as an external independent validation set to evaluate the model performance (n=159).
+
     -   Feature selection
 
+    A random sampling method was used to screen for differentially expressed proteins in three subtypes, a total of 50 replicates were performed, 40 of which reached the threshold (p value \<0.01, fold change \>1.5) that were initially selected as differentially expressed proteins. After removing the proteins with correlations higher than 0.9 with other proteins,Boruta algorithm from the Boruta R package was used to select the subtype-specifically expressed proteins.
+
+    In the differential analysis step, two variance analysis strategies were adopted : (1) comparison between any two of three subtypes; (2) comparison between any one subtype and the other two subtypes.
+
+    Here, two kind of feature were selected by Boruta algorithm. One is used to distinguish SIII subtypes from other subtypes, and the other is used to distinguish SI from other subtypes.
+
     -   Model training and validtion
+
+    In this step, the KNN (K-Nearest Neighbors) algorithm of the caret R package was used to construct the SI discriminating panel and SIII discriminating panel, respectively. And a five-fold cross-validation was performed to further reduce the number of signatures of the discriminating panel.
